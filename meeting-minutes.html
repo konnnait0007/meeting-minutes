@@ -1,0 +1,1822 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>会議録作成アプリ</title>
+    <script src="https://unpkg.com/docx@8.5.0/build/index.umd.js"></script>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', 'Meiryo', sans-serif;
+            background: #f1f3f7; min-height: 100vh; padding-bottom: 60px;
+            color: #111827;
+        }
+
+        /* ── ヘッダー ── */
+        .app-header {
+            background: linear-gradient(135deg, #1e1b4b 0%, #4f46e5 100%);
+            color: #fff; padding: 24px 24px 20px; text-align: center;
+            position: relative;
+        }
+        .app-header h1 { font-size: 1.55rem; font-weight: 700; letter-spacing: -0.01em; }
+        .app-header p  { margin-top: 4px; font-size: 0.85rem; opacity: 0.78; }
+        .header-tools {
+            position: absolute; top: 16px; right: 16px; display: flex; gap: 8px;
+        }
+        .header-tools button {
+            background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3);
+            padding: 7px 13px; border-radius: 8px; cursor: pointer; font-size: 0.83rem;
+            font-family: inherit; transition: background 0.15s;
+        }
+        .header-tools button:hover { background: rgba(255,255,255,0.28); }
+
+        /* ── タブ ── */
+        .tabs {
+            display: flex; max-width: 880px; margin: 0 auto;
+            background: #e5e7eb;
+        }
+        .tab-btn {
+            flex: 1; padding: 13px; border: none; background: transparent;
+            font-size: 0.93rem; font-weight: 600; color: #6b7280; cursor: pointer;
+            font-family: inherit; transition: all 0.2s; border-bottom: 3px solid transparent;
+        }
+        .tab-btn.active { color: #4f46e5; background: #fff; border-bottom-color: #4f46e5; }
+        .tab-btn:hover:not(.active) { color: #374151; background: #f3f4f6; }
+
+        /* ── メインコンテンツ ── */
+        .main { max-width: 880px; margin: 0 auto; padding: 24px 16px; }
+
+        .card {
+            background: #fff; border-radius: 14px; padding: 22px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.06); margin-bottom: 16px;
+        }
+        .card-title {
+            font-size: 0.78rem; font-weight: 700; color: #9ca3af;
+            text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 14px;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .card-title .step {
+            background: #4f46e5; color: #fff; width: 22px; height: 22px;
+            border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+            font-size: 0.75rem; letter-spacing: 0;
+        }
+
+        /* ── フォーム要素 ── */
+        label { display: block; font-size: 0.85rem; font-weight: 600; color: #374151; margin-bottom: 6px; }
+        input[type="text"], input[type="date"], input[type="time"], input[type="password"],
+        textarea, select {
+            width: 100%; padding: 9px 12px; border: 1px solid #d1d5db;
+            border-radius: 8px; font-family: inherit; font-size: 0.92rem;
+            background: #fff; color: #111827; transition: border 0.15s;
+        }
+        input:focus, textarea:focus, select:focus {
+            outline: none; border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.1);
+        }
+        textarea { resize: vertical; min-height: 100px; line-height: 1.55; }
+
+        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+        .form-row.three { grid-template-columns: 1fr 1fr 1fr; }
+        .form-row.full { grid-template-columns: 1fr; }
+        @media (max-width: 600px) { .form-row, .form-row.three { grid-template-columns: 1fr; } }
+
+        .field { margin-bottom: 14px; }
+        .help { font-size: 0.77rem; color: #6b7280; margin-top: 4px; line-height: 1.4; }
+
+        /* ── ボタン ── */
+        .btn {
+            padding: 10px 18px; border-radius: 8px; border: none; cursor: pointer;
+            font-family: inherit; font-size: 0.9rem; font-weight: 600;
+            transition: all 0.15s; display: inline-flex; align-items: center; gap: 6px;
+        }
+        .btn-primary { background: #4f46e5; color: #fff; }
+        .btn-primary:hover:not(:disabled) { background: #4338ca; }
+        .btn-primary:disabled { background: #a5a3e8; cursor: not-allowed; }
+        .btn-secondary { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
+        .btn-secondary:hover:not(:disabled) { background: #e5e7eb; }
+        .btn-danger { background: #fee2e2; color: #dc2626; border: 1px solid #fecaca; }
+        .btn-danger:hover:not(:disabled) { background: #fecaca; }
+        .btn-ghost { background: transparent; color: #4f46e5; }
+        .btn-ghost:hover:not(:disabled) { background: #eef2ff; }
+
+        .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+        /* ── 入力モード切替 ── */
+        .input-modes {
+            display: flex; gap: 6px; padding: 4px; background: #f3f4f6;
+            border-radius: 8px; margin-bottom: 14px;
+        }
+        .input-mode {
+            flex: 1; padding: 8px 12px; border: none; background: transparent;
+            font-size: 0.85rem; font-weight: 600; color: #6b7280; cursor: pointer;
+            border-radius: 6px; font-family: inherit; transition: all 0.15s;
+        }
+        .input-mode.active { background: #fff; color: #4f46e5; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+
+        .input-panel { display: none; }
+        .input-panel.active { display: block; }
+
+        /* ── 録音 UI ── */
+        .recording-status {
+            display: flex; align-items: center; gap: 8px; padding: 10px 14px;
+            background: #f9fafb; border-radius: 8px; margin-bottom: 10px;
+            font-size: 0.88rem; color: #374151;
+        }
+        .rec-dot {
+            width: 10px; height: 10px; border-radius: 50%; background: #9ca3af;
+        }
+        .recording .rec-dot { background: #ef4444; animation: pulse 1.4s infinite; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.8); }
+        }
+        .interim {
+            color: #6b7280; font-style: italic; padding: 8px 12px;
+            background: #fffbeb; border-radius: 6px; font-size: 0.85rem;
+            min-height: 2.4em; line-height: 1.4;
+        }
+
+        /* ── 設定ダイアログ ── */
+        dialog {
+            border: none; border-radius: 14px; padding: 0; max-width: 720px;
+            width: calc(100% - 32px); max-height: calc(100vh - 64px);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+        }
+        dialog::backdrop { background: rgba(0,0,0,0.5); }
+        .dialog-header {
+            padding: 18px 24px; border-bottom: 1px solid #e5e7eb;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .dialog-header h2 { font-size: 1.1rem; font-weight: 700; color: #111827; }
+        .dialog-body { padding: 20px 24px; overflow-y: auto; max-height: 70vh; }
+        .dialog-footer {
+            padding: 14px 24px; border-top: 1px solid #e5e7eb;
+            display: flex; justify-content: flex-end; gap: 8px;
+        }
+        .close-btn {
+            background: none; border: none; font-size: 1.4rem; cursor: pointer;
+            color: #6b7280; line-height: 1;
+        }
+
+        /* ── 設定タブ ── */
+        .settings-tabs {
+            display: flex; border-bottom: 1px solid #e5e7eb; margin-bottom: 18px;
+        }
+        .settings-tab {
+            padding: 9px 16px; border: none; background: transparent; cursor: pointer;
+            font-family: inherit; font-size: 0.88rem; font-weight: 600; color: #6b7280;
+            border-bottom: 2px solid transparent;
+        }
+        .settings-tab.active { color: #4f46e5; border-bottom-color: #4f46e5; }
+        .settings-panel { display: none; }
+        .settings-panel.active { display: block; }
+
+        /* ── 匿名化テーブル ── */
+        .name-table {
+            width: 100%; border-collapse: collapse; font-size: 0.88rem;
+        }
+        .name-table th, .name-table td {
+            padding: 7px 8px; text-align: left; border-bottom: 1px solid #e5e7eb;
+        }
+        .name-table th { background: #f9fafb; font-weight: 600; color: #6b7280; font-size: 0.78rem; text-transform: uppercase; }
+        .name-table input[type="text"] { padding: 5px 8px; font-size: 0.85rem; }
+        .name-table select { padding: 5px 8px; font-size: 0.85rem; }
+        .name-table .delete-row {
+            background: transparent; border: none; color: #dc2626; cursor: pointer;
+            font-size: 1rem; padding: 4px 6px;
+        }
+
+        /* ── 進捗表示 ── */
+        .status-banner {
+            padding: 10px 14px; border-radius: 8px; margin-bottom: 12px;
+            font-size: 0.88rem; display: none;
+        }
+        .status-banner.show { display: block; }
+        .status-banner.info { background: #eef2ff; color: #3730a3; border: 1px solid #c7d2fe; }
+        .status-banner.success { background: #d1fae5; color: #065f46; border: 1px solid #a7f3d0; }
+        .status-banner.error { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+        .status-banner.warn { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+
+        .spinner {
+            display: inline-block; width: 14px; height: 14px;
+            border: 2px solid #c7d2fe; border-top-color: #4f46e5;
+            border-radius: 50%; animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── アウトプット ── */
+        .output-area {
+            min-height: 400px; font-family: 'Meiryo', monospace; font-size: 0.92rem;
+            line-height: 1.6;
+        }
+
+        details { margin-top: 10px; }
+        summary {
+            cursor: pointer; font-size: 0.85rem; font-weight: 600; color: #4f46e5;
+            padding: 8px 0;
+        }
+        summary:hover { color: #3730a3; }
+
+        .badge {
+            display: inline-block; padding: 2px 8px; border-radius: 999px;
+            font-size: 0.72rem; font-weight: 600; background: #eef2ff; color: #4338ca;
+        }
+        .badge.warn { background: #fef3c7; color: #92400e; }
+
+        .privacy-note {
+            background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px;
+            padding: 10px 14px; font-size: 0.83rem; color: #166534; margin-bottom: 14px;
+            line-height: 1.5;
+        }
+        .privacy-note strong { color: #14532d; }
+
+        .small { font-size: 0.83rem; color: #6b7280; }
+
+        kbd {
+            background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 4px;
+            padding: 1px 5px; font-size: 0.78rem; font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+
+<header class="app-header">
+    <h1>会議録作成アプリ</h1>
+    <p>音声 / 録音 / テキストから 全体会・支援会議・企画会議 を自動生成</p>
+    <div class="header-tools">
+        <button id="btn-settings">⚙ 設定</button>
+        <button id="btn-help">？ ヘルプ</button>
+    </div>
+</header>
+
+<nav class="tabs" role="tablist">
+    <button class="tab-btn active" data-tab="zentaikai" role="tab">全体会</button>
+    <button class="tab-btn" data-tab="shienkaigi" role="tab">支援会議</button>
+    <button class="tab-btn" data-tab="kikakukaigi" role="tab">企画会議</button>
+</nav>
+
+<main class="main">
+
+    <div class="privacy-note">
+        🔒 <strong>個人情報保護について</strong> — 利用者様や職員のお名前は「設定 → 匿名化リスト」に登録すると、
+        AIに送信する前に自動で伏字（U001/S001等）に置換され、戻ってきた結果で元の名前に復元されます。
+        AI事業者には実名が渡りません。
+    </div>
+
+    <!-- STEP 1: 会議メタ情報 -->
+    <section class="card">
+        <div class="card-title"><span class="step">1</span>会議の基本情報</div>
+        <div class="form-row three">
+            <div>
+                <label>期日</label>
+                <input type="date" id="meta-date">
+            </div>
+            <div>
+                <label>開始時間</label>
+                <input type="time" id="meta-time-start" value="13:00">
+            </div>
+            <div>
+                <label>終了時間</label>
+                <input type="time" id="meta-time-end" value="14:30">
+            </div>
+        </div>
+        <div class="form-row">
+            <div>
+                <label>司会</label>
+                <input type="text" id="meta-chair" placeholder="例: 石井 康一">
+            </div>
+            <div>
+                <label>記録</label>
+                <input type="text" id="meta-recorder" placeholder="例: 下重 秋穂">
+            </div>
+        </div>
+        <div class="field">
+            <label>出席者（改行区切りでもカンマ区切りでも可）</label>
+            <textarea id="meta-attendees" rows="2" placeholder="例: 岡部園長　石井支援部長　荒木看護師　稲村　佐川　…"></textarea>
+        </div>
+    </section>
+
+    <!-- STEP 2: 入力 -->
+    <section class="card">
+        <div class="card-title"><span class="step">2</span>会議の内容を入力</div>
+
+        <div class="input-modes">
+            <button class="input-mode active" data-mode="paste">📝 テキスト貼付</button>
+            <button class="input-mode" data-mode="record">🎙 ライブ録音</button>
+            <button class="input-mode" data-mode="upload">📁 音声ファイル</button>
+        </div>
+
+        <!-- 貼付モード -->
+        <div class="input-panel active" data-panel="paste">
+            <label>会議の発言録 / メモ / 文字起こし</label>
+            <textarea id="transcript-paste" rows="12" placeholder="既に文字起こし済みのテキストをここに貼り付けてください。&#10;&#10;・話し言葉そのままでも構いません&#10;・箇条書きメモでも要約に使えます&#10;・発言者名（〇〇園長：…）が分かれば精度が上がります"></textarea>
+            <div class="help">手書きメモを入力する場合も、できるだけ会議で出た固有名詞・日付・数字・決定事項を残してください。</div>
+        </div>
+
+        <!-- ライブ録音モード -->
+        <div class="input-panel" data-panel="record">
+            <div class="recording-status" id="rec-status">
+                <span class="rec-dot"></span>
+                <span id="rec-status-text">マイクは停止中です</span>
+                <span class="badge" id="rec-duration" style="margin-left:auto;">00:00</span>
+            </div>
+            <div class="btn-row" style="margin-bottom:10px;">
+                <button class="btn btn-primary" id="rec-start">🎙 録音開始</button>
+                <button class="btn btn-danger" id="rec-stop" disabled>■ 停止</button>
+                <button class="btn btn-secondary" id="rec-clear">クリア</button>
+            </div>
+            <div class="interim" id="rec-interim">（録音中の最新発言がここに表示されます）</div>
+            <label style="margin-top:14px;">これまでの認識結果</label>
+            <textarea id="transcript-record" rows="10" placeholder="録音を開始すると認識結果がここに追記されます"></textarea>
+            <div class="help">
+                ⚠ Chrome / Edge ブラウザ専用です。マイクの許可が必要です。
+                Web Speech API（Google提供・無料）を利用しているため、認識精度はインターネット接続と話者距離に依存します。
+                長時間録音中はタブを閉じないでください。
+            </div>
+        </div>
+
+        <!-- ファイルアップロード -->
+        <div class="input-panel" data-panel="upload">
+            <label>音声 / 動画ファイル（MP3, MP4, M4A, WAV, WebM）</label>
+            <input type="file" id="audio-file" accept="audio/*,video/mp4,video/webm" style="padding:8px;">
+            <div class="help" style="margin-top:8px;">
+                既定では <strong>Groq Whisper API</strong>（無料・高速）を使用します。<br>
+                25MBを超えるファイル（スマホ録音120分など）は <strong>ブラウザ内で自動的に16kHzモノラルに圧縮・分割</strong> してから送信します。手動圧縮は不要です。<br>
+                完全無料の文字起こしには「⚙ 設定 → APIキー」で Groq APIキーの登録が必要です（メアド登録のみ・5分）。
+            </div>
+            <div class="btn-row" style="margin-top:10px;">
+                <button class="btn btn-primary" id="btn-transcribe">📝 文字起こしを実行</button>
+            </div>
+            <div id="stt-progress" class="status-banner" style="margin-top:10px;"></div>
+            <label style="margin-top:14px;">文字起こし結果</label>
+            <textarea id="transcript-upload" rows="10" placeholder="文字起こしの結果がここに表示されます"></textarea>
+        </div>
+    </section>
+
+    <!-- STEP 3: 生成 -->
+    <section class="card">
+        <div class="card-title"><span class="step">3</span>会議録を生成</div>
+
+        <div id="status-banner" class="status-banner"></div>
+
+        <div class="btn-row">
+            <button class="btn btn-primary" id="btn-generate">✨ 会議録を生成</button>
+            <button class="btn btn-secondary" id="btn-preview-anon">匿名化プレビュー</button>
+        </div>
+
+        <details>
+            <summary>使用モデル / プロバイダーの確認</summary>
+            <div class="small" id="model-info" style="padding:8px 0;">設定で確認してください</div>
+        </details>
+    </section>
+
+    <!-- STEP 4: 出力 -->
+    <section class="card">
+        <div class="card-title"><span class="step">4</span>出力結果（編集可能）</div>
+        <textarea id="output" class="output-area" rows="22" placeholder="ここに会議録が生成されます。生成後も編集できます。"></textarea>
+        <div class="btn-row" style="margin-top:14px;">
+            <button class="btn btn-primary" id="btn-download-docx">📄 Word(.docx) で保存</button>
+            <button class="btn btn-secondary" id="btn-download-md">📄 Markdown で保存</button>
+            <button class="btn btn-secondary" id="btn-download-txt">📄 テキストで保存</button>
+            <button class="btn btn-ghost" id="btn-copy">📋 コピー</button>
+        </div>
+    </section>
+
+</main>
+
+<!-- ============== 設定ダイアログ ============== -->
+<dialog id="settings-dialog">
+    <div class="dialog-header">
+        <h2>⚙ 設定</h2>
+        <button class="close-btn" data-close="settings-dialog">✕</button>
+    </div>
+    <div class="dialog-body">
+        <div class="settings-tabs">
+            <button class="settings-tab active" data-stab="api">APIキー</button>
+            <button class="settings-tab" data-stab="anon">匿名化リスト</button>
+            <button class="settings-tab" data-stab="prompt">プロンプト調整</button>
+        </div>
+
+        <!-- API設定 -->
+        <div class="settings-panel active" data-spanel="api">
+            <div class="field">
+                <label>要約に使うAIプロバイダー</label>
+                <select id="cfg-provider">
+                    <option value="gemini">Google Gemini（無料枠あり / 推奨）</option>
+                    <option value="claude">Anthropic Claude（高品質日本語）</option>
+                    <option value="openai">OpenAI GPT</option>
+                </select>
+                <div class="help">
+                    <strong>無料枠の注意:</strong> Geminiの無料枠は入力データが学習に利用される可能性があります。
+                    必ず「匿名化リスト」を活用してください。
+                </div>
+            </div>
+
+            <div class="field" id="cfg-gemini-block">
+                <label>Gemini API キー</label>
+                <input type="password" id="cfg-gemini-key" placeholder="AIza...">
+                <div class="help">
+                    <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>
+                    で無料取得できます（Googleアカウントでログイン）
+                </div>
+                <label style="margin-top:10px;">モデル</label>
+                <select id="cfg-gemini-model">
+                    <option value="gemini-2.5-flash">gemini-2.5-flash（推奨・無料枠あり）</option>
+                    <option value="gemini-2.5-pro">gemini-2.5-pro（より高品質）</option>
+                    <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+                    <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+                    <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+                </select>
+            </div>
+
+            <div class="field" id="cfg-claude-block" style="display:none;">
+                <label>Anthropic API キー</label>
+                <input type="password" id="cfg-claude-key" placeholder="sk-ant-...">
+                <div class="help">
+                    <a href="https://console.anthropic.com/" target="_blank" rel="noopener">Anthropic Console</a>
+                    で取得（有料・APIデータは学習に使われません）
+                </div>
+                <label style="margin-top:10px;">モデル</label>
+                <select id="cfg-claude-model">
+                    <option value="claude-haiku-4-5-20251001">claude-haiku-4-5（高速・安価）</option>
+                    <option value="claude-sonnet-4-6">claude-sonnet-4-6（標準）</option>
+                    <option value="claude-opus-4-7">claude-opus-4-7（最高品質）</option>
+                </select>
+            </div>
+
+            <div class="field" id="cfg-openai-block" style="display:none;">
+                <label>OpenAI API キー</label>
+                <input type="password" id="cfg-openai-key" placeholder="sk-...">
+                <div class="help">
+                    <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">OpenAI Platform</a>
+                    で取得（有料・APIデータは既定では学習に使われません）
+                </div>
+                <label style="margin-top:10px;">要約モデル</label>
+                <select id="cfg-openai-model">
+                    <option value="gpt-4o-mini">gpt-4o-mini（高速・安価）</option>
+                    <option value="gpt-4o">gpt-4o（標準）</option>
+                </select>
+            </div>
+
+            <hr style="border:none; border-top:1px solid #e5e7eb; margin:18px 0;">
+
+            <div class="field">
+                <label>音声文字起こしのプロバイダー</label>
+                <select id="cfg-stt-provider">
+                    <option value="groq">Groq（無料・高速・推奨）</option>
+                    <option value="openai">OpenAI Whisper（$0.006/分）</option>
+                </select>
+            </div>
+
+            <div class="field" id="cfg-groq-block">
+                <label>Groq APIキー</label>
+                <input type="password" id="cfg-groq-key" placeholder="gsk_...">
+                <div class="help">
+                    <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a>
+                    でメアド登録のみで無料発行（クレカ不要）
+                </div>
+                <label style="margin-top:10px;">モデル</label>
+                <select id="cfg-groq-model">
+                    <option value="whisper-large-v3-turbo">whisper-large-v3-turbo（高速・推奨）</option>
+                    <option value="whisper-large-v3">whisper-large-v3（最高精度）</option>
+                </select>
+            </div>
+
+            <div class="field" id="cfg-whisper-block" style="display:none;">
+                <label>OpenAI APIキー（Whisper用）</label>
+                <input type="password" id="cfg-whisper-key" placeholder="sk-...">
+                <div class="help">
+                    要約用にOpenAIを選んでいる場合はそのキーを再利用できます（自動入力されます）
+                </div>
+            </div>
+        </div>
+
+        <!-- 匿名化リスト -->
+        <div class="settings-panel" data-spanel="anon">
+            <p class="small" style="margin-bottom:12px;">
+                ここに登録した名前は <strong>AI送信前に伏字</strong> に置換され、AIから返ってきたテキストで <strong>元の名前に自動復元</strong> されます。<br>
+                同じ氏名・名字を共有する人物がいる場合は氏名フルで登録してください。
+            </p>
+            <div class="btn-row" style="margin-bottom:10px;">
+                <button class="btn btn-secondary" id="btn-add-name">＋ 名前を追加</button>
+                <button class="btn btn-secondary" id="btn-load-defaults">📋 サンプルを読み込む</button>
+                <button class="btn btn-danger" id="btn-clear-names">全削除</button>
+            </div>
+            <div style="overflow-x:auto;">
+                <table class="name-table" id="name-table">
+                    <thead>
+                        <tr>
+                            <th>区分</th>
+                            <th style="width:42%;">実名</th>
+                            <th>備考（任意）</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="name-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- プロンプト調整 -->
+        <div class="settings-panel" data-spanel="prompt">
+            <p class="small" style="margin-bottom:12px;">
+                各会議のテンプレートに合わせてLLMへ与える指示文を編集できます。空欄にするとデフォルトに戻ります。
+            </p>
+            <div class="btn-row" style="margin-bottom:12px;">
+                <button class="btn btn-secondary" id="btn-load-prompt-defaults">📋 推奨設定を読み込む</button>
+                <button class="btn btn-ghost" id="btn-clear-prompt">クリア</button>
+            </div>
+            <div class="field">
+                <label>追加の指示（全会議共通）</label>
+                <textarea id="cfg-extra-prompt" rows="14" placeholder="例: 「敬称は様で統一」「日付は和暦で記載」など"></textarea>
+            </div>
+            <div class="field">
+                <label>定型文・組織固有の用語</label>
+                <textarea id="cfg-glossary" rows="8" placeholder="例:&#10;ヒヤリハット = 重大事故に至らなかった事象&#10;あづまっぺ = 日中一時支援事業所"></textarea>
+            </div>
+        </div>
+    </div>
+    <div class="dialog-footer">
+        <button class="btn btn-secondary" data-close="settings-dialog">閉じる</button>
+        <button class="btn btn-primary" id="btn-save-settings">保存</button>
+    </div>
+</dialog>
+
+<!-- ============== ヘルプダイアログ ============== -->
+<dialog id="help-dialog">
+    <div class="dialog-header">
+        <h2>？ ヘルプ</h2>
+        <button class="close-btn" data-close="help-dialog">✕</button>
+    </div>
+    <div class="dialog-body">
+        <div style="background:#fef3c7; border:1px solid #fde68a; border-radius:8px; padding:10px 14px; margin-bottom:14px; font-size:0.85rem; color:#92400e;">
+            💡 <strong>このアプリはエクスプローラーから直接開いて使ってください。</strong>
+            プレビュー画面で開いている場合、外部リンク（Google AI Studio等）はブロックされます。<br>
+            <code>C:\Users\c41ug\Desktop\クロード\meeting-minutes.html</code> をダブルクリックすると通常のブラウザで開きます。
+        </div>
+
+        <h3 style="font-size:0.95rem; margin-bottom:8px;">使い方の流れ</h3>
+        <ol style="margin-left:20px; line-height:1.8; font-size:0.9rem;">
+            <li>初回のみ「⚙ 設定」から AIプロバイダーとAPIキーを登録</li>
+            <li>同じく設定の「匿名化リスト」に利用者様・職員のお名前を登録</li>
+            <li>会議の種類のタブを選択（全体会／支援会議／企画会議）</li>
+            <li>STEP1: 期日・出席者などの基本情報を入力</li>
+            <li>STEP2: 会議内容を入力（3つの方法から選択）
+                <ul style="margin-left:20px;">
+                    <li><strong>テキスト貼付</strong>: Teams等の文字起こしを貼る（一番手軽）</li>
+                    <li><strong>ライブ録音</strong>: 会議中にPCで録音→自動文字起こし</li>
+                    <li><strong>音声ファイル</strong>: 録音済みMP3等をアップロード（要OpenAIキー）</li>
+                </ul>
+            </li>
+            <li>STEP3: 「会議録を生成」ボタンを押す</li>
+            <li>STEP4: 編集して Word 形式でダウンロード</li>
+        </ol>
+
+        <h3 style="font-size:0.95rem; margin:18px 0 8px;">プライバシーについて</h3>
+        <p style="font-size:0.88rem; line-height:1.6;">
+            このアプリはサーバーを持たず、すべてブラウザ内で動作します。
+            APIキーや匿名化リストはお使いのPCの<strong>localStorage</strong>に保存され、外部送信されません。<br>
+            AIに送る前に「匿名化リスト」の名前は伏字に置換され、応答が返ってきた時点で元の名前に復元します。
+            ただし、固有名詞のすべてを匿名化できるわけではないため、出力結果は必ず人の目で確認してください。
+        </p>
+
+        <h3 style="font-size:0.95rem; margin:18px 0 8px;">無料で使うには</h3>
+        <p style="font-size:0.88rem; line-height:1.6;">
+            <strong>要約 → Gemini API</strong>: 日次の無料枠あり（モデルにより制限）。<br>
+            <strong>音声ファイル文字起こし → Groq API</strong>: メアド登録のみで無料・高速（Whisper-large-v3）。
+            <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a> で取得。<br>
+            <strong>会議中のライブ録音 → Web Speech API</strong>: ブラウザ標準機能でAPIキー不要。<br>
+            120分のスマホ録音もブラウザ内で自動的に16kHzモノラルへ圧縮・分割するので、25MB制限を意識する必要はありません。
+        </p>
+
+        <h3 style="font-size:0.95rem; margin:18px 0 8px;">トラブル</h3>
+        <ul style="margin-left:20px; line-height:1.8; font-size:0.88rem;">
+            <li>「APIキーが無効」→ 設定でキーを確認、コピー時の余分な空白に注意</li>
+            <li>録音が止まる → ブラウザのマイク許可と、PCの省電力設定を確認</li>
+            <li>長すぎる会議 → STEP2のテキストを2分割して2回生成し、後でつなげる</li>
+        </ul>
+    </div>
+    <div class="dialog-footer">
+        <button class="btn btn-primary" data-close="help-dialog">閉じる</button>
+    </div>
+</dialog>
+
+<script>
+//==============================================================
+// 1. ストレージ・設定管理
+//==============================================================
+const STORAGE_KEY = 'mtg_minutes_v1';
+
+const defaultSettings = () => ({
+    provider: 'gemini',
+    geminiKey: '',
+    geminiModel: 'gemini-2.5-flash',
+    claudeKey: '',
+    claudeModel: 'claude-haiku-4-5-20251001',
+    openaiKey: '',
+    openaiModel: 'gpt-4o-mini',
+    sttProvider: 'groq',
+    groqKey: '',
+    groqModel: 'whisper-large-v3-turbo',
+    whisperKey: '',
+    extraPrompt: '',
+    glossary: '',
+    names: []  // {type, name, note}
+});
+
+let settings = loadSettings();
+
+function loadSettings() {
+    try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) return Object.assign(defaultSettings(), JSON.parse(raw));
+    } catch (e) { console.warn('Settings load failed', e); }
+    return defaultSettings();
+}
+
+function saveSettings() {
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+        return true;
+    } catch (e) {
+        console.warn('localStorage に保存できませんでした:', e);
+        return false;
+    }
+}
+
+//==============================================================
+// 2. 匿名化エンジン
+//==============================================================
+const TYPE_PREFIX = { user: 'U', staff: 'S', facility: 'F', medical: 'M', region: 'G', other: 'X' };
+const TYPE_LABEL = {
+    user: '利用者', staff: '職員', facility: '施設',
+    medical: '医療機関', region: '地域名', other: 'その他'
+};
+
+function buildAnonymizer(names) {
+    const sorted = [...names].filter(n => n.name && n.name.trim()).sort((a, b) => b.name.length - a.name.length);
+    const counter = {};
+    const mapping = [];
+    for (const n of sorted) {
+        const t = n.type || 'other';
+        counter[t] = (counter[t] || 0) + 1;
+        const code = `${TYPE_PREFIX[t] || 'X'}${String(counter[t]).padStart(3, '0')}`;
+        mapping.push({ original: n.name.trim(), code });
+    }
+    return mapping;
+}
+
+function anonymize(text, mapping) {
+    let out = text;
+    for (const m of mapping) {
+        out = out.split(m.original).join(m.code);
+    }
+    return out;
+}
+
+function deanonymize(text, mapping) {
+    let out = text;
+    for (const m of mapping) {
+        out = out.split(m.code).join(m.original);
+    }
+    return out;
+}
+
+//==============================================================
+// 3. テンプレート定義（LLMへのプロンプト）
+//==============================================================
+const TEMPLATES = {
+    zentaikai: {
+        title: '全体会',
+        sections: [
+            '1. 事務局連絡会報告',
+            '2. 避難訓練の振り返り',
+            '3. 行事',
+            '4. 日中一時・短期入所',
+            '5. 支援関係',
+            '6. 医療関係',
+            '7. 食事関係',
+            '8. 事務関係',
+            '9. その他'
+        ],
+        guidance: `「全体会」の会議録テンプレートに従い、以下9セクションに整理してください。
+各セクションには箇条書き（・）で要点を記載。発言録ではなく、決定事項・連絡事項・申し送り事項として簡潔に。
+報告事項のうち企画会議の議事と重複する内容には「○企画会議記録参照」と記載してOKです。
+利用者様の事故・服薬・他害・医療等は【事故報告】【他害】○医療 のように見出しをつけて整理してください。`
+    },
+    shienkaigi: {
+        title: '支援会議',
+        sections: [
+            '【連絡事項】',
+            '1. 今後の予定',
+            '2. 短期入所・日中一時',
+            '3. ヒヤリ・事故報告・他傷・自傷報告',
+            '4. その他',
+            '【協議事項】',
+            '1. 医務より',
+            '2. 利用者さんについて',
+            '   ●あすなろ荘',
+            '   ●和泉荘',
+            '   ●さくら荘',
+            '   ●明日香荘',
+            '   ●あおば荘',
+            '3. その他'
+        ],
+        guidance: `「支援会議」のテンプレートに従い、【連絡事項】と【協議事項】の2ブロックに分けて整理してください。
+利用者さんについては各ホーム（あすなろ荘・和泉荘・さくら荘・明日香荘・あおば荘）ごとに見出しを立て、
+該当の話題があったホームのみ内容を埋めてください（該当なしのホームは「特になし」で構いません）。
+ヒヤリハット・事故・他傷・自傷は具体的に「いつ・誰が・どうなった・対応」を箇条書きで残してください。`
+    },
+    kikakukaigi: {
+        title: '企画会議',
+        sections: [
+            '1. 事務局連絡会報告',
+            '   【学園】',
+            '   【エンジェル園】',
+            '   【共生園】',
+            '   【愛生園】',
+            '2. 行事',
+            '3. 支援関係',
+            '4. 医療関係',
+            '5. その他'
+        ],
+        guidance: `「企画会議」のテンプレートに従い、1.事務局連絡会報告は施設ごと（学園／エンジェル園／共生園／愛生園）に小見出しをつけて記載してください。
+法人運営に関わる重要事項（規程改正、給与、補正予算、採用、研修、寄付、設備、地域連携推進委員会 等）は「事務局連絡会報告」に。
+各施設ごとに以下を含めるよう意識してください: 入退所・体験利用、行事（クリスマス会等）、ヒヤリハット、事故報告、他害、医療（CT・通院・服薬調整）。
+細かい支援方針の話（誤薬対策・服薬支援中の私語禁止・身体援助講習会など）は「3. 支援関係」へ。`
+    }
+};
+
+function buildPrompt(tab, meta, transcript) {
+    const tpl = TEMPLATES[tab];
+    const sections = tpl.sections.map(s => `  ${s}`).join('\n');
+    const extra = settings.extraPrompt ? `\n\n■追加の指示\n${settings.extraPrompt}` : '';
+    const glossary = settings.glossary ? `\n\n■組織固有の用語・定型文\n${settings.glossary}` : '';
+    const attendees = meta.attendees || '（記載なし）';
+
+    return `あなたは日本の社会福祉法人の事務担当者です。職員会議の発言記録から、所定のテンプレートに沿って公式な「会議記録簿」を作成します。
+
+■会議の種類: ${tpl.title}
+■期日: ${meta.date}
+■時間: ${meta.timeStart} 〜 ${meta.timeEnd}
+■司会: ${meta.chair || '（記載なし）'}
+■記録: ${meta.recorder || '（記載なし）'}
+■出席者: ${attendees}
+
+■会議録の構造（必ずこの順番・見出しで出力すること）:
+${sections}
+
+■作成方針
+${tpl.guidance}
+
+■共通ルール
+- 出力はプレーンテキストの会議録本文のみ（ヘッダー罫線等は不要）
+- 見出しはテンプレートのものをそのまま使用
+- 各項目は箇条書き（・で開始）
+- 利用者様の名前は「○○様」、職員の名前は「○○さん」または役職+苗字（例: 石井部長）で表記
+- 数字や日付は元発言の表記を尊重（例: 12/8、令和8年1月6日）
+- 該当する内容が会議で触れられていない項目は項目名のみ残し空欄にせず「特になし」または項目自体を省略
+- 推測で内容を加えない。記録にない情報は書かない${extra}${glossary}
+
+■会議の内容（文字起こし / メモ）
+${transcript}
+
+上記の発言記録をもとに、テンプレートに沿った会議録を作成してください。`;
+}
+
+//==============================================================
+// 4. LLM 呼び出し
+//==============================================================
+async function callGemini(prompt) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${settings.geminiModel}:generateContent?key=${encodeURIComponent(settings.geminiKey)}`;
+    const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.2, maxOutputTokens: 8192 }
+        })
+    });
+    if (!res.ok) {
+        const err = await res.text();
+        throw new Error(`Gemini API エラー (${res.status}): ${err.slice(0, 400)}`);
+    }
+    const data = await res.json();
+    const txt = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!txt) throw new Error('Gemini APIから応答が得られませんでした: ' + JSON.stringify(data).slice(0, 300));
+    return txt;
+}
+
+async function callClaude(prompt) {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': settings.claudeKey,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify({
+            model: settings.claudeModel,
+            max_tokens: 8000,
+            messages: [{ role: 'user', content: prompt }]
+        })
+    });
+    if (!res.ok) {
+        const err = await res.text();
+        throw new Error(`Claude API エラー (${res.status}): ${err.slice(0, 400)}`);
+    }
+    const data = await res.json();
+    return data?.content?.[0]?.text || '';
+}
+
+async function callOpenAI(prompt) {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${settings.openaiKey}`
+        },
+        body: JSON.stringify({
+            model: settings.openaiModel,
+            messages: [{ role: 'user', content: prompt }],
+            temperature: 0.2
+        })
+    });
+    if (!res.ok) {
+        const err = await res.text();
+        throw new Error(`OpenAI API エラー (${res.status}): ${err.slice(0, 400)}`);
+    }
+    const data = await res.json();
+    return data?.choices?.[0]?.message?.content || '';
+}
+
+async function callLLM(prompt) {
+    if (settings.provider === 'gemini') return callGemini(prompt);
+    if (settings.provider === 'claude') return callClaude(prompt);
+    if (settings.provider === 'openai') return callOpenAI(prompt);
+    throw new Error('プロバイダーが選択されていません');
+}
+
+//==============================================================
+// 5. 音声→テキスト（Groq / OpenAI Whisper、自動圧縮・分割対応）
+//==============================================================
+const MAX_CHUNK_BYTES = 24 * 1024 * 1024; // 25MB制限の余裕を持たせる
+const TARGET_SAMPLE_RATE = 16000;          // Whisperの推奨
+
+async function decodeAudio(file) {
+    const ArrayBufferData = await file.arrayBuffer();
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const ctx = new AC();
+    try {
+        return await ctx.decodeAudioData(ArrayBufferData.slice(0));
+    } finally {
+        ctx.close && ctx.close();
+    }
+}
+
+async function resampleToMono16k(audioBuffer) {
+    const targetLen = Math.ceil(audioBuffer.duration * TARGET_SAMPLE_RATE);
+    const offline = new OfflineAudioContext(1, targetLen, TARGET_SAMPLE_RATE);
+    const src = offline.createBufferSource();
+    src.buffer = audioBuffer;
+    src.connect(offline.destination);
+    src.start();
+    return await offline.startRendering();
+}
+
+function encodeWAV(samples, sampleRate) {
+    const len = samples.length;
+    const buffer = new ArrayBuffer(44 + len * 2);
+    const view = new DataView(buffer);
+    const writeStr = (off, s) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+    writeStr(0, 'RIFF');
+    view.setUint32(4, 36 + len * 2, true);
+    writeStr(8, 'WAVE');
+    writeStr(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeStr(36, 'data');
+    view.setUint32(40, len * 2, true);
+    let off = 44;
+    for (let i = 0; i < len; i++, off += 2) {
+        const s = Math.max(-1, Math.min(1, samples[i]));
+        view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    }
+    return new Blob([buffer], { type: 'audio/wav' });
+}
+
+function chunkSamples(samples, sampleRate, maxBytes) {
+    // 16-bit PCM → 2 bytes/sample。WAVヘッダ44バイト分の余裕をみる
+    const maxSamples = Math.floor((maxBytes - 44) / 2);
+    const chunks = [];
+    for (let start = 0; start < samples.length; start += maxSamples) {
+        const end = Math.min(start + maxSamples, samples.length);
+        chunks.push({
+            blob: encodeWAV(samples.subarray(start, end), sampleRate),
+            startSec: start / sampleRate,
+            durSec: (end - start) / sampleRate
+        });
+    }
+    return chunks;
+}
+
+async function preprocessForSTT(file, onProgress) {
+    // 25MB以下なら無加工で投げる
+    if (file.size <= MAX_CHUNK_BYTES) {
+        onProgress && onProgress('そのまま送信できるサイズです');
+        return [{ blob: file, startSec: 0, durSec: null }];
+    }
+    onProgress && onProgress('ブラウザ内で音声を圧縮中…（16kHzモノラル変換）');
+    const audioBuf = await decodeAudio(file);
+    const resampled = await resampleToMono16k(audioBuf);
+    const samples = resampled.getChannelData(0);
+    const chunks = chunkSamples(samples, TARGET_SAMPLE_RATE, MAX_CHUNK_BYTES);
+    onProgress && onProgress(`${chunks.length}個のチャンクに分割しました（合計 ${(audioBuf.duration / 60).toFixed(1)}分）`);
+    return chunks;
+}
+
+async function transcribeChunkGroq(blob) {
+    if (!settings.groqKey) throw new Error('Groq APIキーが設定されていません');
+    const fd = new FormData();
+    fd.append('file', blob, 'audio.wav');
+    fd.append('model', settings.groqModel);
+    fd.append('language', 'ja');
+    fd.append('response_format', 'text');
+    fd.append('temperature', '0');
+    const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${settings.groqKey}` },
+        body: fd
+    });
+    if (!res.ok) {
+        const err = await res.text();
+        throw new Error(`Groq API エラー (${res.status}): ${err.slice(0, 400)}`);
+    }
+    return (await res.text()).trim();
+}
+
+async function transcribeChunkOpenAI(blob) {
+    if (!settings.whisperKey) throw new Error('OpenAI APIキー（Whisper用）が設定されていません');
+    const fd = new FormData();
+    fd.append('file', blob, 'audio.wav');
+    fd.append('model', 'whisper-1');
+    fd.append('language', 'ja');
+    fd.append('response_format', 'text');
+    const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${settings.whisperKey}` },
+        body: fd
+    });
+    if (!res.ok) {
+        const err = await res.text();
+        throw new Error(`Whisper API エラー (${res.status}): ${err.slice(0, 400)}`);
+    }
+    return (await res.text()).trim();
+}
+
+async function transcribeAudio(file, onProgress) {
+    const provider = settings.sttProvider || 'groq';
+    const chunks = await preprocessForSTT(file, onProgress);
+    const results = [];
+    for (let i = 0; i < chunks.length; i++) {
+        onProgress && onProgress(`文字起こし中… (${i + 1}/${chunks.length})`);
+        const txt = provider === 'openai'
+            ? await transcribeChunkOpenAI(chunks[i].blob)
+            : await transcribeChunkGroq(chunks[i].blob);
+        results.push(txt);
+    }
+    return results.join('\n');
+}
+
+//==============================================================
+// 6. UI ヘルパー
+//==============================================================
+function $(id) { return document.getElementById(id); }
+function $$(sel) { return document.querySelectorAll(sel); }
+
+function showStatus(type, msg, withSpinner = false) {
+    const el = $('status-banner');
+    el.className = `status-banner show ${type}`;
+    el.innerHTML = withSpinner ? `<span class="spinner"></span> ${msg}` : msg;
+}
+function hideStatus() { $('status-banner').className = 'status-banner'; }
+
+function getCurrentTab() {
+    const active = document.querySelector('.tab-btn.active');
+    return active ? active.dataset.tab : 'zentaikai';
+}
+
+function getCurrentInputMode() {
+    const m = document.querySelector('.input-mode.active');
+    return m ? m.dataset.mode : 'paste';
+}
+
+function getCurrentTranscript() {
+    const mode = getCurrentInputMode();
+    if (mode === 'paste') return $('transcript-paste').value;
+    if (mode === 'record') return $('transcript-record').value;
+    if (mode === 'upload') return $('transcript-upload').value;
+    return '';
+}
+
+function getMeta() {
+    return {
+        date: $('meta-date').value || '（未入力）',
+        timeStart: $('meta-time-start').value || '',
+        timeEnd: $('meta-time-end').value || '',
+        chair: $('meta-chair').value,
+        recorder: $('meta-recorder').value,
+        attendees: $('meta-attendees').value
+    };
+}
+
+//==============================================================
+// 7. タブ・モード切替
+//==============================================================
+$$('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        $$('.tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+    });
+});
+
+$$('.input-mode').forEach(btn => {
+    btn.addEventListener('click', () => {
+        $$('.input-mode').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const mode = btn.dataset.mode;
+        $$('.input-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === mode));
+    });
+});
+
+$$('.settings-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+        $$('.settings-tab').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const t = btn.dataset.stab;
+        $$('.settings-panel').forEach(p => p.classList.toggle('active', p.dataset.spanel === t));
+    });
+});
+
+//==============================================================
+// 8. 設定ダイアログ
+//==============================================================
+$('btn-settings').addEventListener('click', () => {
+    $('cfg-provider').value = settings.provider;
+    $('cfg-gemini-key').value = settings.geminiKey;
+    $('cfg-gemini-model').value = settings.geminiModel;
+    $('cfg-claude-key').value = settings.claudeKey;
+    $('cfg-claude-model').value = settings.claudeModel;
+    $('cfg-openai-key').value = settings.openaiKey;
+    $('cfg-openai-model').value = settings.openaiModel;
+    $('cfg-stt-provider').value = settings.sttProvider;
+    $('cfg-groq-key').value = settings.groqKey;
+    $('cfg-groq-model').value = settings.groqModel;
+    $('cfg-whisper-key').value = settings.whisperKey;
+    $('cfg-extra-prompt').value = settings.extraPrompt;
+    $('cfg-glossary').value = settings.glossary;
+    updateProviderBlocks();
+    updateSttBlocks();
+    renderNameTable();
+    $('settings-dialog').showModal();
+});
+
+$('btn-help').addEventListener('click', () => $('help-dialog').showModal());
+
+$$('[data-close]').forEach(btn => {
+    btn.addEventListener('click', () => {
+        $(btn.dataset.close).close();
+    });
+});
+
+$('cfg-provider').addEventListener('change', updateProviderBlocks);
+function updateProviderBlocks() {
+    const p = $('cfg-provider').value;
+    $('cfg-gemini-block').style.display = p === 'gemini' ? 'block' : 'none';
+    $('cfg-claude-block').style.display = p === 'claude' ? 'block' : 'none';
+    $('cfg-openai-block').style.display = p === 'openai' ? 'block' : 'none';
+}
+
+$('cfg-stt-provider').addEventListener('change', updateSttBlocks);
+function updateSttBlocks() {
+    const p = $('cfg-stt-provider').value;
+    $('cfg-groq-block').style.display = p === 'groq' ? 'block' : 'none';
+    $('cfg-whisper-block').style.display = p === 'openai' ? 'block' : 'none';
+}
+
+$('btn-save-settings').addEventListener('click', () => {
+    try {
+        settings.provider = $('cfg-provider').value;
+        settings.geminiKey = $('cfg-gemini-key').value.trim();
+        settings.geminiModel = $('cfg-gemini-model').value;
+        settings.claudeKey = $('cfg-claude-key').value.trim();
+        settings.claudeModel = $('cfg-claude-model').value;
+        settings.openaiKey = $('cfg-openai-key').value.trim();
+        settings.openaiModel = $('cfg-openai-model').value;
+        settings.sttProvider = $('cfg-stt-provider').value;
+        settings.groqKey = $('cfg-groq-key').value.trim();
+        settings.groqModel = $('cfg-groq-model').value;
+        settings.whisperKey = $('cfg-whisper-key').value.trim();
+        settings.extraPrompt = $('cfg-extra-prompt').value;
+        settings.glossary = $('cfg-glossary').value;
+        settings.names = readNameTable();
+        const ok = saveSettings();
+        updateModelInfo();
+        if (ok) {
+            showStatus('success', '✅ 設定を保存しました');
+        } else {
+            showStatus('warn', '⚠ 設定はこのセッション内では使えますが、PCに保存できませんでした（プレビュー環境かプライベートモードの可能性）。本番利用はブラウザで直接HTMLを開いてください。');
+        }
+        setTimeout(hideStatus, 4000);
+    } catch (e) {
+        console.error(e);
+        showStatus('error', '❌ 設定の保存中にエラー: ' + e.message);
+    } finally {
+        $('settings-dialog').close();
+    }
+});
+
+//==============================================================
+// 9. 匿名化テーブル
+//==============================================================
+function renderNameTable() {
+    const tb = $('name-tbody');
+    tb.innerHTML = '';
+    if (settings.names.length === 0) {
+        addNameRow({ type: 'user', name: '', note: '' });
+    } else {
+        settings.names.forEach(n => addNameRow(n));
+    }
+}
+
+function addNameRow(data) {
+    const tb = $('name-tbody');
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+        <td>
+            <select class="row-type">
+                <option value="user">利用者</option>
+                <option value="staff">職員</option>
+                <option value="facility">施設</option>
+                <option value="medical">医療機関</option>
+                <option value="region">地域</option>
+                <option value="other">その他</option>
+            </select>
+        </td>
+        <td><input type="text" class="row-name" placeholder="例: 岡部 太郎"></td>
+        <td><input type="text" class="row-note" placeholder="例: 園長"></td>
+        <td><button class="delete-row" title="削除">✕</button></td>
+    `;
+    tr.querySelector('.row-type').value = data.type || 'user';
+    tr.querySelector('.row-name').value = data.name || '';
+    tr.querySelector('.row-note').value = data.note || '';
+    tr.querySelector('.delete-row').addEventListener('click', () => tr.remove());
+    tb.appendChild(tr);
+}
+
+function readNameTable() {
+    const rows = $('name-tbody').querySelectorAll('tr');
+    const out = [];
+    rows.forEach(r => {
+        const name = r.querySelector('.row-name').value.trim();
+        if (!name) return;
+        out.push({
+            type: r.querySelector('.row-type').value,
+            name,
+            note: r.querySelector('.row-note').value.trim()
+        });
+    });
+    return out;
+}
+
+// プロンプト調整: 推奨設定の読み込み
+const RECOMMENDED_EXTRA_PROMPT = `■敬称・呼称ルール
+- 利用者様の名前: 「○○様」で統一（例: 豊様、明美様、橋本香織様）
+- 職員の名前: 「名前+役職」（例: 岡部園長、石井部長、矢内係長、荒木看護師、長田栄養士、並木相談員）
+- 役職のない職員のみ「○○さん」を使用
+- 利用者様と職員で表記スタイルを混同しないこと
+
+■日付・時間の表記
+- ヘッダー（期日）: 和暦「令和○年○月○日（曜）」
+- 本文中の日付: 元発言の表記を尊重し短縮形でよい（例: 12/8、1/14AMまで、1/31 16時～2/1まで）
+- 時刻: 元発言通りに記載（例: 13:00～14:10、10:30～13:00）
+
+■事故・ヒヤリハット・他害・誤薬の記録ルール
+- 必ず「いつ・誰が・何が起きた・どう対応したか」の4要素を含める
+- 良い例: 「畠野様　豊様に服を引っ張られ、背中に傷ができる。ご家族に説明、謝罪する。」
+- 良い例: 「俊信様　朝と夕の服薬間違い（夜勤者の薬包確認手順を見直し）」
+- 通院・家族説明・謝罪・報告先などの対応が記録にあれば省略しない
+
+■漏れと余談の扱い
+- テンプレート項目に該当する話題が出なかった場合: 見出しは残し「特になし」と記載
+- 雑談・余談でも、業務に関わる連絡・申し送り・気付き（持ち場対応、スマホ使用、外食費用 等）は「その他」項目に拾う
+- 純粋な世間話・私的会話は除外
+- 推測で内容を補わない。記録にない情報は決して書かない`;
+
+const RECOMMENDED_GLOSSARY = `ヒヤリハット = 重大事故に至らなかった事象。再発防止のため記録が重要
+あづまっぺ = 日中一時支援事業所
+地域連携推進委員会 = ご家族・区長等を交えた施設運営の意見交換会
+ユニット加算 = 小規模ユニットケア体制への加算
+苦情解決研修 = 利用者・家族からの苦情対応のための職員研修
+内部監査 = 預り金等の管理状況の自主点検`;
+
+$('btn-load-prompt-defaults').addEventListener('click', () => {
+    const cur1 = $('cfg-extra-prompt').value.trim();
+    const cur2 = $('cfg-glossary').value.trim();
+    if (cur1 || cur2) {
+        if (!confirm('現在の入力を推奨設定で上書きします。よろしいですか？')) return;
+    }
+    $('cfg-extra-prompt').value = RECOMMENDED_EXTRA_PROMPT;
+    $('cfg-glossary').value = RECOMMENDED_GLOSSARY;
+});
+
+$('btn-clear-prompt').addEventListener('click', () => {
+    if (!confirm('追加の指示と用語集を空にします。よろしいですか？')) return;
+    $('cfg-extra-prompt').value = '';
+    $('cfg-glossary').value = '';
+});
+
+$('btn-add-name').addEventListener('click', () => addNameRow({ type: 'user', name: '', note: '' }));
+$('btn-clear-names').addEventListener('click', () => {
+    if (confirm('全ての名前を削除しますか？（保存ボタンを押すまで確定されません）')) {
+        $('name-tbody').innerHTML = '';
+    }
+});
+$('btn-load-defaults').addEventListener('click', () => {
+    const defaults = [
+        // ── 施設 ──
+        { type: 'facility', name: '愛生園', note: '生活介護' },
+        { type: 'facility', name: 'エンジェル園', note: '' },
+        { type: 'facility', name: '共生園', note: '' },
+        { type: 'facility', name: '学園', note: '' },
+        { type: 'facility', name: 'あすなろ荘', note: 'グループホーム' },
+        { type: 'facility', name: '和泉荘', note: 'グループホーム' },
+        { type: 'facility', name: 'さくら荘', note: 'グループホーム' },
+        { type: 'facility', name: '明日香荘', note: 'グループホーム' },
+        { type: 'facility', name: 'あおば荘', note: 'グループホーム' },
+        { type: 'facility', name: 'あづまっぺ', note: '日中一時' },
+
+        // ── 医療機関 ──
+        { type: 'medical', name: '奥羽大学', note: '' },
+        { type: 'medical', name: 'あさかホスピタル', note: '' },
+        { type: 'medical', name: '矢吹病院', note: '' },
+
+        // ── 地域 ──
+        { type: 'region', name: '石川町', note: '' },
+        { type: 'region', name: '須賀川', note: '' },
+        { type: 'region', name: '平田村', note: '' },
+
+        // ── 職員（管理職・専門職） ──
+        { type: 'staff', name: '岡部 智恵子', note: '園長' },
+        { type: 'staff', name: '石井 康一', note: '支援部長' },
+        { type: 'staff', name: '相田 英貴', note: '経理事務員兼庶務係員' },
+        { type: 'staff', name: '佐藤 春美', note: '経理事務員兼庶務係員' },
+        { type: 'staff', name: '並木 江理子', note: '支援係長兼相談支援専門員' },
+        { type: 'staff', name: '吾妻 永介', note: '支援係長兼相談支援専門員' },
+        { type: 'staff', name: '吉田 賢治', note: '支援員兼相談支援専門員' },
+        { type: 'staff', name: '永沼 徹一也', note: '支援員兼相談支援専門員' },
+        { type: 'staff', name: '荒木 知美', note: '看護師' },
+        { type: 'staff', name: '冨田 梢子', note: 'サービス管理責任者兼支援係長' },
+        { type: 'staff', name: '矢内 秀樹', note: '支援係長' },
+
+        // ── 職員（あおば荘） ──
+        { type: 'staff', name: '宗像 千里子', note: 'あおば荘' },
+        { type: 'staff', name: '佐川 雛', note: 'あおば荘' },
+        { type: 'staff', name: '出島 聡恭', note: 'あおば荘' },
+        { type: 'staff', name: '齋藤 勇亜', note: 'あおば荘' },
+
+        // ── 職員（明日香荘） ──
+        { type: 'staff', name: '稲村 麗華', note: '明日香荘' },
+        { type: 'staff', name: '下重 秋穂', note: '明日香荘' },
+        { type: 'staff', name: '田島 彩花', note: '明日香荘' },
+
+        // ── 職員（さくら荘・あすなろ荘・和泉荘） ──
+        { type: 'staff', name: '金内 吉徳', note: 'さくら荘' },
+        { type: 'staff', name: '佐川 龍太', note: 'あすなろ荘' },
+        { type: 'staff', name: '瀬谷 夏美', note: '和泉荘' },
+        { type: 'staff', name: '添田 由宇', note: '和泉荘' },
+
+        // ── 職員（パート支援員） ──
+        { type: 'staff', name: '田中 由美子', note: 'パート支援員' },
+        { type: 'staff', name: '最上 利江', note: 'パート支援員' },
+        { type: 'staff', name: '鈴木 美和', note: 'パート支援員' },
+        { type: 'staff', name: '久下 南代', note: 'パート支援員' },
+        { type: 'staff', name: '澤田 春江', note: 'パート支援員' },
+        { type: 'staff', name: '鈴木 久代', note: 'パート支援員' },
+
+        // ── 職員（介助・用務・栄養・調理） ──
+        { type: 'staff', name: '高橋 奈々', note: 'パート介助員' },
+        { type: 'staff', name: '薄葉 重雄', note: 'パート用務員' },
+        { type: 'staff', name: '長田 久美子', note: '栄養管理部長' },
+        { type: 'staff', name: '矢吹 幸子', note: '調理員' },
+        { type: 'staff', name: '鈴木 美和子', note: '調理員' },
+        { type: 'staff', name: '岡部 恭平', note: '調理員' },
+        { type: 'staff', name: '円谷 美和', note: 'パート調理員' },
+
+        // ── 利用者（生活介護・通常） ──
+        { type: 'user', name: '深谷 勝信', note: '' },
+        { type: 'user', name: '渡辺 栄吉', note: '' },
+        { type: 'user', name: '折笠 光宏', note: '' },
+        { type: 'user', name: '舘 篤', note: '' },
+        { type: 'user', name: '猪合 弘樹', note: '' },
+        { type: 'user', name: '小林 寛享', note: '' },
+        { type: 'user', name: '高橋 琢', note: '' },
+        { type: 'user', name: '高原 幸一', note: '' },
+        { type: 'user', name: '高橋 敦巳', note: '' },
+        { type: 'user', name: '小堤 毅', note: '' },
+        { type: 'user', name: '遠藤 清', note: '' },
+        { type: 'user', name: '永沼 俊信', note: '' },
+        { type: 'user', name: '鈴木 貴晃', note: '' },
+        { type: 'user', name: '菅家 政幸', note: '' },
+        { type: 'user', name: '渡辺 信斗', note: '' },
+        { type: 'user', name: '熊田 光男', note: '' },
+        { type: 'user', name: '上野 和子', note: '' },
+        { type: 'user', name: '福田 明美', note: '' },
+        { type: 'user', name: '熊谷 美紀', note: '' },
+        { type: 'user', name: '菊池 里美', note: '' },
+        { type: 'user', name: '斎藤 志帆', note: '' },
+        { type: 'user', name: '吉成 まゆみ', note: '' },
+        { type: 'user', name: '川崎 香', note: '' },
+        { type: 'user', name: '佐藤 恵子', note: '' },
+        { type: 'user', name: '野崎 珠代', note: '' },
+
+        // ── 利用者（短期・生活介護利用者） ──
+        { type: 'user', name: '本田 栄子', note: '短期・生活介護' },
+        { type: 'user', name: '石森 友也', note: '短期・生活介護' },
+        { type: 'user', name: '鈴木 淳', note: '短期・生活介護' },
+        { type: 'user', name: '千葉 泉帆', note: '短期・生活介護' },
+        { type: 'user', name: '柳沼 俊介', note: '短期・生活介護' },
+        { type: 'user', name: '南原 四郎', note: '短期・生活介護' },
+        { type: 'user', name: '佐藤 豊', note: '短期・生活介護' },
+        { type: 'user', name: '前場 茂雄', note: '短期・生活介護' },
+        { type: 'user', name: '鈴木 吉晴', note: '短期・生活介護' },
+        { type: 'user', name: '力丸 和行', note: '短期・生活介護' },
+        { type: 'user', name: '渡辺 達大', note: '短期・生活介護' },
+        { type: 'user', name: '根本 善一', note: '短期・生活介護' },
+        { type: 'user', name: '国分 一夫', note: '短期・生活介護' },
+        { type: 'user', name: '箭内 広中', note: '短期・生活介護' },
+        { type: 'user', name: '諸橋 学亮', note: '短期・生活介護' },
+        { type: 'user', name: '宗像 孝之', note: '短期・生活介護' },
+        { type: 'user', name: '渡部 真', note: '短期・生活介護' },
+        { type: 'user', name: '中嶋 悟', note: '短期・生活介護' },
+        { type: 'user', name: '芳賀 康弘', note: '短期・生活介護' },
+        { type: 'user', name: '佐々木 顕信', note: '短期・生活介護' },
+        { type: 'user', name: '小林 友貴', note: '短期・生活介護' },
+        { type: 'user', name: '松島 正芳', note: '短期・生活介護' },
+        { type: 'user', name: '古森 功二', note: '短期・生活介護' },
+        { type: 'user', name: '大谷 圭士', note: '短期・生活介護' },
+        { type: 'user', name: '福田 直美', note: '短期・生活介護' },
+        { type: 'user', name: '遠藤 みゆき', note: '短期・生活介護' },
+        { type: 'user', name: '添田 思美', note: '短期・生活介護' },
+        { type: 'user', name: '笠巻 久子', note: '短期・生活介護' },
+        { type: 'user', name: '高木 宗子', note: '短期・生活介護' },
+        { type: 'user', name: '橋本 香織', note: '短期・生活介護' }
+    ];
+    if (!confirm(`現在のリストを削除し、サンプル ${defaults.length} 件で上書きします。よろしいですか？`)) return;
+    $('name-tbody').innerHTML = '';
+    defaults.forEach(d => addNameRow(d));
+});
+
+//==============================================================
+// 10. ライブ録音（Web Speech API）
+//==============================================================
+let recognition = null;
+let recStarting = false;
+let recManuallyStopped = false;
+let recStartedAt = null;
+let recDurationTimer = null;
+
+function setupRecognition() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+        $('rec-start').disabled = true;
+        $('rec-status-text').textContent = 'お使いのブラウザは音声認識に未対応です（Chrome/Edge推奨）';
+        return null;
+    }
+    const r = new SR();
+    r.lang = 'ja-JP';
+    r.continuous = true;
+    r.interimResults = true;
+    r.maxAlternatives = 1;
+
+    r.onresult = (e) => {
+        let interim = '';
+        let final = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+            const t = e.results[i][0].transcript;
+            if (e.results[i].isFinal) final += t;
+            else interim += t;
+        }
+        if (final) {
+            const ta = $('transcript-record');
+            ta.value += (ta.value && !ta.value.endsWith('\n') ? '\n' : '') + final.trim() + '\n';
+            ta.scrollTop = ta.scrollHeight;
+        }
+        $('rec-interim').textContent = interim || '（…）';
+    };
+    r.onerror = (e) => {
+        console.warn('Speech recognition error', e.error);
+        if (e.error === 'no-speech' || e.error === 'aborted') return;
+        $('rec-status-text').textContent = `エラー: ${e.error}`;
+    };
+    r.onend = () => {
+        if (!recManuallyStopped) {
+            // 自動再開（長時間録音用）
+            try { r.start(); } catch(_) {}
+        } else {
+            $('rec-status').classList.remove('recording');
+            $('rec-status-text').textContent = 'マイクは停止中です';
+            $('rec-start').disabled = false;
+            $('rec-stop').disabled = true;
+            if (recDurationTimer) { clearInterval(recDurationTimer); recDurationTimer = null; }
+        }
+    };
+    return r;
+}
+
+$('rec-start').addEventListener('click', async () => {
+    if (!recognition) recognition = setupRecognition();
+    if (!recognition) return;
+    recManuallyStopped = false;
+    try {
+        recognition.start();
+        recStartedAt = Date.now();
+        $('rec-status').classList.add('recording');
+        $('rec-status-text').textContent = '録音中…';
+        $('rec-start').disabled = true;
+        $('rec-stop').disabled = false;
+        recDurationTimer = setInterval(() => {
+            const sec = Math.floor((Date.now() - recStartedAt) / 1000);
+            const mm = String(Math.floor(sec / 60)).padStart(2, '0');
+            const ss = String(sec % 60).padStart(2, '0');
+            $('rec-duration').textContent = `${mm}:${ss}`;
+        }, 500);
+    } catch (e) {
+        alert('録音を開始できませんでした: ' + e.message);
+    }
+});
+
+$('rec-stop').addEventListener('click', () => {
+    if (!recognition) return;
+    recManuallyStopped = true;
+    try { recognition.stop(); } catch (_) {}
+});
+
+$('rec-clear').addEventListener('click', () => {
+    if (confirm('録音テキストをクリアします。よろしいですか？')) {
+        $('transcript-record').value = '';
+        $('rec-interim').textContent = '（録音中の最新発言がここに表示されます）';
+        $('rec-duration').textContent = '00:00';
+    }
+});
+
+//==============================================================
+// 11. 音声ファイル文字起こし
+//==============================================================
+$('btn-transcribe').addEventListener('click', async () => {
+    const f = $('audio-file').files[0];
+    if (!f) { alert('音声ファイルを選択してください'); return; }
+    const provider = settings.sttProvider || 'groq';
+    if (provider === 'groq' && !settings.groqKey) {
+        alert('設定 → APIキー で Groq APIキーを登録してください\nhttps://console.groq.com/keys で無料発行できます');
+        return;
+    }
+    if (provider === 'openai' && !settings.whisperKey) {
+        alert('設定 → APIキー で OpenAI APIキー（Whisper用）を登録してください');
+        return;
+    }
+    const sizeStr = `${(f.size/1024/1024).toFixed(1)}MB`;
+    const startedAt = Date.now();
+    showStatus('info', `文字起こし開始… ${f.name}（${sizeStr}, プロバイダー: ${provider}）`, true);
+    $('btn-transcribe').disabled = true;
+    const progEl = $('stt-progress');
+    progEl.className = 'status-banner show info';
+    progEl.innerHTML = '<span class="spinner"></span> 準備中…';
+    try {
+        const text = await transcribeAudio(f, (msg) => {
+            progEl.innerHTML = `<span class="spinner"></span> ${msg}`;
+        });
+        $('transcript-upload').value = text;
+        const sec = ((Date.now() - startedAt) / 1000).toFixed(0);
+        progEl.className = 'status-banner show success';
+        progEl.textContent = `✅ 完了（${sec}秒）`;
+        showStatus('success', '✅ 文字起こしが完了しました');
+        setTimeout(hideStatus, 3000);
+    } catch (e) {
+        console.error(e);
+        progEl.className = 'status-banner show error';
+        progEl.textContent = '❌ ' + e.message;
+        showStatus('error', '❌ ' + e.message);
+    } finally {
+        $('btn-transcribe').disabled = false;
+    }
+});
+
+//==============================================================
+// 12. 匿名化プレビュー
+//==============================================================
+$('btn-preview-anon').addEventListener('click', () => {
+    const transcript = getCurrentTranscript();
+    if (!transcript.trim()) {
+        alert('STEP2 で会議の内容を入力してください');
+        return;
+    }
+    const mapping = buildAnonymizer(settings.names);
+    const anon = anonymize(transcript, mapping);
+    const popup = window.open('', '_blank', 'width=720,height=600');
+    popup.document.write(`
+        <html><head><meta charset="utf-8"><title>匿名化プレビュー</title>
+        <style>body{font-family:Meiryo,sans-serif;padding:20px;line-height:1.6;}
+        pre{background:#f3f4f6;padding:14px;border-radius:8px;white-space:pre-wrap;font-size:13px;}
+        h2{margin-top:18px;font-size:14px;color:#4f46e5;}</style>
+        </head><body>
+        <h1 style="font-size:16px;">匿名化プレビュー</h1>
+        <p style="font-size:13px;color:#6b7280;">下記がAIに送信される内容です。実名が含まれていないかご確認ください。</p>
+        <h2>置換マップ（${mapping.length}件）</h2>
+        <pre>${mapping.map(m => `${m.original}  →  ${m.code}`).join('\n') || '（リストが空です）'}</pre>
+        <h2>送信されるテキスト</h2>
+        <pre>${anon.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre>
+        </body></html>
+    `);
+});
+
+//==============================================================
+// 13. 会議録生成
+//==============================================================
+$('btn-generate').addEventListener('click', async () => {
+    const transcript = getCurrentTranscript();
+    if (!transcript.trim()) { alert('STEP2 で会議の内容を入力してください'); return; }
+
+    const provider = settings.provider;
+    const key = provider === 'gemini' ? settings.geminiKey
+              : provider === 'claude' ? settings.claudeKey
+              : settings.openaiKey;
+    if (!key) { alert('設定 → APIキー で APIキーを登録してください'); return; }
+
+    const tab = getCurrentTab();
+    const meta = getMeta();
+    const mapping = buildAnonymizer(settings.names);
+    const anonTranscript = anonymize(transcript, mapping);
+    const prompt = buildPrompt(tab, meta, anonTranscript);
+
+    showStatus('info', `${TEMPLATES[tab].title} の会議録を生成中…（プロバイダー: ${provider}）`, true);
+    $('btn-generate').disabled = true;
+    try {
+        const llmOut = await callLLM(prompt);
+        const restored = deanonymize(llmOut, mapping);
+        // ヘッダーを付加
+        const header = buildHeader(tab, meta);
+        $('output').value = header + '\n\n' + restored;
+        showStatus('success', '✅ 生成しました。STEP4で内容を確認・編集できます。');
+        setTimeout(hideStatus, 4000);
+    } catch (e) {
+        console.error(e);
+        showStatus('error', '❌ ' + e.message);
+    } finally {
+        $('btn-generate').disabled = false;
+    }
+});
+
+function buildHeader(tab, meta) {
+    const title = TEMPLATES[tab].title;
+    const dateStr = meta.date ? formatJpDate(meta.date) : '令和　年　月　日（　）';
+    const timeStr = (meta.timeStart || meta.timeEnd) ? `${meta.timeStart || ''}〜${meta.timeEnd || ''}` : '';
+    return `会議記録簿〈 ${title} 〉
+期日: ${dateStr}
+時間: ${timeStr}
+司会: ${meta.chair || ''}
+記録: ${meta.recorder || ''}
+出席者: ${meta.attendees || ''}`;
+}
+
+function formatJpDate(iso) {
+    // YYYY-MM-DD → 令和X年M月D日（曜）
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d)) return iso;
+    const y = d.getFullYear();
+    const reiwa = y - 2018;
+    const m = d.getMonth() + 1;
+    const day = d.getDate();
+    const youbi = ['日','月','火','水','木','金','土'][d.getDay()];
+    return `令和${reiwa}年${m}月${day}日（${youbi}）`;
+}
+
+//==============================================================
+// 14. 出力（ダウンロード）
+//==============================================================
+$('btn-download-md').addEventListener('click', () => {
+    download(buildFilename('md'), $('output').value, 'text/markdown');
+});
+$('btn-download-txt').addEventListener('click', () => {
+    download(buildFilename('txt'), $('output').value, 'text/plain');
+});
+$('btn-copy').addEventListener('click', async () => {
+    try {
+        await navigator.clipboard.writeText($('output').value);
+        showStatus('success', '✅ クリップボードにコピーしました');
+        setTimeout(hideStatus, 2000);
+    } catch (e) {
+        alert('コピーに失敗しました: ' + e.message);
+    }
+});
+
+function buildFilename(ext) {
+    const tab = getCurrentTab();
+    const title = TEMPLATES[tab].title;
+    const meta = getMeta();
+    const datePart = meta.date ? meta.date.replace(/-/g,'') : new Date().toISOString().slice(0,10).replace(/-/g,'');
+    return `${datePart}_会議録_${title}.${ext}`;
+}
+
+function download(filename, content, mime) {
+    const blob = new Blob([content], { type: mime + ';charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+//==============================================================
+// 15. Word(.docx) 出力 — テンプレート表形式に近づける
+//==============================================================
+$('btn-download-docx').addEventListener('click', async () => {
+    const text = $('output').value;
+    if (!text.trim()) { alert('先に会議録を生成してください'); return; }
+    try {
+        await generateDocx(text);
+    } catch (e) {
+        console.error(e);
+        alert('Word生成に失敗しました: ' + e.message);
+    }
+});
+
+async function generateDocx(text) {
+    const D = window.docx;
+    const tab = getCurrentTab();
+    const title = TEMPLATES[tab].title;
+    const meta = getMeta();
+    const dateStr = meta.date ? formatJpDate(meta.date) : '';
+    const timeStr = (meta.timeStart || meta.timeEnd) ? `${meta.timeStart || ''}〜${meta.timeEnd || ''}` : '';
+
+    // 出力テキストを「議題 → 協議内容」のセクションに分解
+    const sections = parseSections(text);
+
+    const cell = (children, opts={}) => new D.TableCell({
+        children: Array.isArray(children) ? children : [children],
+        ...opts
+    });
+    const para = (txt, opts={}) => new D.Paragraph({
+        children: [new D.TextRun({ text: txt || '', font: 'Meiryo', size: 20, ...opts })],
+        spacing: { line: 280 }
+    });
+    const paraBold = (txt) => para(txt, { bold: true });
+
+    // ヘッダー部のテーブル（園長/支援部長/期日/時間/司会/記録/出席者）
+    const headerTable = new D.Table({
+        rows: [
+            new D.TableRow({ children: [
+                cell(paraBold('園長')), cell(para('')),
+                cell(paraBold('支援部長')), cell(para('')),
+                cell(paraBold('期　日')), cell(para(dateStr))
+            ]}),
+            new D.TableRow({ children: [
+                cell(paraBold('司　会')), cell(para(meta.chair || ''), { columnSpan: 3 }),
+                cell(paraBold('時　間')), cell(para(timeStr))
+            ]}),
+            new D.TableRow({ children: [
+                cell(paraBold('記　録')), cell(para(meta.recorder || ''), { columnSpan: 3 }),
+                cell(paraBold('出席者')), cell(para(meta.attendees || ''))
+            ]})
+        ],
+        width: { size: 100, type: D.WidthType.PERCENTAGE }
+    });
+
+    // 本文テーブル（議題 / 協議内容）
+    const bodyRows = [
+        new D.TableRow({
+            tableHeader: true,
+            children: [
+                cell(paraBold('議　題')),
+                cell(paraBold('協　議　内　容'))
+            ]
+        })
+    ];
+    for (const sec of sections) {
+        bodyRows.push(new D.TableRow({
+            children: [
+                cell(paraBold(sec.heading)),
+                cell(sec.content.split('\n').map(l => para(l)))
+            ]
+        }));
+    }
+    const bodyTable = new D.Table({
+        rows: bodyRows,
+        width: { size: 100, type: D.WidthType.PERCENTAGE }
+    });
+
+    const doc = new D.Document({
+        styles: { default: { document: { run: { font: 'Meiryo' } } } },
+        sections: [{
+            properties: { page: { margin: { top: 720, bottom: 720, left: 720, right: 720 } } },
+            children: [
+                new D.Paragraph({
+                    children: [new D.TextRun({ text: `様式第　　号　　　　会議記録簿〈 ${title} 〉`, font: 'Meiryo', size: 24, bold: true })],
+                    alignment: D.AlignmentType.CENTER,
+                    spacing: { after: 200 }
+                }),
+                headerTable,
+                new D.Paragraph({ children: [new D.TextRun({ text: '', size: 12 })] }),
+                bodyTable
+            ]
+        }]
+    });
+
+    const blob = await D.Packer.toBlob(doc);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = buildFilename('docx');
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+// アウトプットを「議題行（数字またはカッコ始まり）」で分割
+function parseSections(text) {
+    const lines = text.split(/\r?\n/);
+    const sections = [];
+    let current = null;
+
+    // ヘッダー部はスキップ
+    let bodyStart = 0;
+    for (let i = 0; i < lines.length; i++) {
+        if (/^(出席者|記録|司会|時間|期日|会議記録簿)/.test(lines[i])) bodyStart = i + 1;
+    }
+
+    const headingRe = /^(?:【[^】]+】|\d+\.|[（(]\d+[）)]|[●○■□]\s*\S)/;
+    for (let i = bodyStart; i < lines.length; i++) {
+        const ln = lines[i];
+        if (!ln.trim()) {
+            if (current) current.content += '\n';
+            continue;
+        }
+        if (headingRe.test(ln.trim())) {
+            if (current) sections.push(current);
+            current = { heading: ln.trim(), content: '' };
+        } else {
+            if (!current) current = { heading: '', content: '' };
+            current.content += (current.content ? '\n' : '') + ln;
+        }
+    }
+    if (current) sections.push(current);
+    if (sections.length === 0) sections.push({ heading: '', content: text });
+    return sections;
+}
+
+//==============================================================
+// 16. モデル情報表示
+//==============================================================
+function updateModelInfo() {
+    const p = settings.provider;
+    const model = p === 'gemini' ? settings.geminiModel
+                : p === 'claude' ? settings.claudeModel
+                : settings.openaiModel;
+    const hasKey = (p === 'gemini' && settings.geminiKey)
+                || (p === 'claude' && settings.claudeKey)
+                || (p === 'openai' && settings.openaiKey);
+    const nameCount = settings.names.length;
+    $('model-info').innerHTML = `
+        プロバイダー: <strong>${p}</strong>　/　モデル: <strong>${model}</strong>　/
+        APIキー: ${hasKey ? '<span class="badge">登録済</span>' : '<span class="badge warn">未登録</span>'}　/
+        匿名化リスト: <strong>${nameCount}</strong>件
+    `;
+}
+
+//==============================================================
+// 17. 初期化
+//==============================================================
+function init() {
+    // 期日にデフォルトで本日を入れる
+    const t = new Date();
+    $('meta-date').value = t.toISOString().slice(0,10);
+    setupRecognition();  // 利用可否チェック
+    updateModelInfo();
+
+    // 初回起動時はヘルプを開く
+    if (!localStorage.getItem(STORAGE_KEY)) {
+        setTimeout(() => $('help-dialog').showModal(), 400);
+    }
+}
+init();
+
+</script>
+</body>
+</html>
