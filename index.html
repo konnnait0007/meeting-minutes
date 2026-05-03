@@ -612,12 +612,30 @@
     </div>
 </dialog>
 
+<dialog id="anon-preview-dialog" style="max-width:760px; width:92vw;">
+    <div class="dialog-header">
+        <h2>🔒 匿名化プレビュー</h2>
+        <button class="close-btn" data-close="anon-preview-dialog">✕</button>
+    </div>
+    <div class="dialog-body">
+        <p style="font-size:0.85rem; color:#6b7280; margin-bottom:14px;">下記がAIに送信される内容です。<strong>実名が含まれていないか</strong>必ずご確認ください。</p>
+        <h3 style="font-size:0.95rem; color:#4f46e5; margin-bottom:8px;">置換マップ <span id="anon-map-count" style="font-weight:normal; color:#6b7280;"></span></h3>
+        <pre id="anon-map-content" style="background:#f3f4f6; padding:12px; border-radius:8px; max-height:200px; overflow:auto; font-size:0.82rem; line-height:1.6; white-space:pre-wrap; margin-bottom:14px;"></pre>
+        <h3 style="font-size:0.95rem; color:#4f46e5; margin-bottom:8px;">送信されるテキスト</h3>
+        <pre id="anon-text-content" style="background:#fff7ed; padding:12px; border-radius:8px; max-height:300px; overflow:auto; font-size:0.85rem; line-height:1.7; white-space:pre-wrap; border:1px solid #fed7aa;"></pre>
+    </div>
+    <div class="dialog-footer">
+        <button class="btn btn-secondary" id="btn-copy-anon">📋 匿名化テキストをコピー</button>
+        <button class="btn btn-primary" data-close="anon-preview-dialog">閉じる</button>
+    </div>
+</dialog>
+
 <script>
 //==============================================================
 // 1. ストレージ・設定管理
 //==============================================================
 const STORAGE_KEY = 'mtg_minutes_v1';
-const DATA_VERSION = '20260503b'; // ← 名前リストを更新したらこの日付を変える
+const DATA_VERSION = '20260503d'; // ← 名前リストを更新したらこの日付を変える
 
 const DEFAULT_NAMES = [
     // ── 施設 ──
@@ -1695,21 +1713,61 @@ $('btn-preview-anon').addEventListener('click', () => {
     }
     const mapping = buildAnonymizer(settings.names);
     const anon = anonymize(transcript, mapping);
-    const popup = window.open('', '_blank', 'width=720,height=600');
-    popup.document.write(`
-        <html><head><meta charset="utf-8"><title>匿名化プレビュー</title>
-        <style>body{font-family:Meiryo,sans-serif;padding:20px;line-height:1.6;}
-        pre{background:#f3f4f6;padding:14px;border-radius:8px;white-space:pre-wrap;font-size:13px;}
-        h2{margin-top:18px;font-size:14px;color:#4f46e5;}</style>
-        </head><body>
-        <h1 style="font-size:16px;">匿名化プレビュー</h1>
-        <p style="font-size:13px;color:#6b7280;">下記がAIに送信される内容です。実名が含まれていないかご確認ください。</p>
-        <h2>置換マップ（${mapping.length}件）</h2>
-        <pre>${mapping.map(m => `${m.original}  →  ${m.code}`).join('\n') || '（リストが空です）'}</pre>
-        <h2>送信されるテキスト</h2>
-        <pre>${anon.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre>
-        </body></html>
-    `);
+    // 実際にテキストに出現した置換のみ表示
+    const usedMappings = mapping.filter(m => transcript.includes(m.original));
+    $('anon-map-count').textContent = `（${usedMappings.length}件 / 登録${mapping.length}件中）`;
+    $('anon-map-content').textContent = usedMappings.length > 0
+        ? usedMappings.map(m => `${m.original}  →  ${m.code}`).join('\n')
+        : '（テキスト内に登録名は見つかりませんでした）';
+    $('anon-text-content').textContent = anon;
+    $('anon-preview-dialog').showModal();
+});
+
+// コピーのフォールバック付き共通関数（Clipboard API失敗時はtextarea+execCommand）
+async function copyToClipboard(text) {
+    // まず標準のClipboard APIを試行
+    try {
+        if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(text);
+            return true;
+        }
+    } catch (e) { /* fall through to fallback */ }
+    // フォールバック: 一時的なtextareaを作って execCommand('copy')
+    try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed; left:-9999px; top:0; opacity:0;';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        ta.setSelectionRange(0, text.length);
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        return ok;
+    } catch (e) {
+        return false;
+    }
+}
+
+$('btn-copy-anon').addEventListener('click', async () => {
+    const text = $('anon-text-content').textContent;
+    const btn = $('btn-copy-anon');
+    const orig = btn.textContent;
+    const ok = await copyToClipboard(text);
+    if (ok) {
+        btn.textContent = '✓ コピーしました';
+        setTimeout(() => { btn.textContent = orig; }, 1500);
+    } else {
+        // フォールバックも失敗した場合: テキストエリアを選択状態にしてユーザーにCtrl+Cを促す
+        const pre = $('anon-text-content');
+        const range = document.createRange();
+        range.selectNodeContents(pre);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        btn.textContent = '↑ Ctrl+C で手動コピー';
+        setTimeout(() => { btn.textContent = orig; }, 3000);
+    }
 });
 
 //==============================================================
@@ -1784,12 +1842,16 @@ $('btn-download-txt').addEventListener('click', () => {
     download(buildFilename('txt'), $('output').value, 'text/plain');
 });
 $('btn-copy').addEventListener('click', async () => {
-    try {
-        await navigator.clipboard.writeText($('output').value);
+    const ok = await copyToClipboard($('output').value);
+    if (ok) {
         showStatus('success', '✅ クリップボードにコピーしました');
         setTimeout(hideStatus, 2000);
-    } catch (e) {
-        alert('コピーに失敗しました: ' + e.message);
+    } else {
+        // フォールバックも失敗 → 出力欄を選択状態に
+        $('output').focus();
+        $('output').select();
+        showStatus('info', '↑ Ctrl+C で手動コピーしてください');
+        setTimeout(hideStatus, 3000);
     }
 });
 
