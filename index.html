@@ -350,6 +350,17 @@
             <div id="stt-progress" class="status-banner" style="margin-top:10px;"></div>
             <label style="margin-top:14px;">文字起こし結果</label>
             <textarea id="transcript-upload" rows="10" placeholder="文字起こしの結果がここに表示されます"></textarea>
+            <div id="mistrans-panel" style="display:none; margin-top:12px; padding:14px; background:#fef3c7; border-left:4px solid #f59e0b; border-radius:0 8px 8px 0;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <strong id="mistrans-title">🔍 誤変換候補</strong>
+                    <div>
+                        <button class="btn btn-secondary" id="btn-mistrans-apply" style="font-size:0.82rem; padding:6px 12px;">✓ 選択を一括置換</button>
+                        <button class="btn btn-ghost" id="btn-mistrans-close" style="font-size:0.82rem; padding:6px 10px;">✕ 閉じる</button>
+                    </div>
+                </div>
+                <p style="font-size:0.82rem; color:#78350f; margin-bottom:10px;">登録名と類似する単語を検出しました。チェックを入れて「一括置換」を押してください。</p>
+                <div id="mistrans-list" style="max-height:240px; overflow-y:auto; background:#fffbeb; border-radius:6px; padding:8px;"></div>
+            </div>
         </div>
     </section>
 
@@ -606,7 +617,7 @@
 // 1. ストレージ・設定管理
 //==============================================================
 const STORAGE_KEY = 'mtg_minutes_v1';
-const DATA_VERSION = '20260503'; // ← 名前リストを更新したらこの日付を変える
+const DATA_VERSION = '20260503b'; // ← 名前リストを更新したらこの日付を変える
 
 const DEFAULT_NAMES = [
     // ── 施設 ──
@@ -1083,6 +1094,24 @@ async function preprocessForSTT(file, onProgress) {
     return chunks;
 }
 
+// Whisperに送る「用語ヒント」を構築（職員名・利用者名・施設名等を渡して認識精度を上げる）
+function buildSTTPrompt() {
+    if (!settings.names || settings.names.length === 0) return '';
+    // 名前のみを抽出（type順: 職員→利用者→施設→医療→地域）
+    const order = { staff: 1, user: 2, facility: 3, medical: 4, region: 5, other: 6 };
+    const sorted = [...settings.names].sort((a, b) => (order[a.type]||9) - (order[b.type]||9));
+    const names = sorted.map(n => n.name).filter(Boolean);
+    // Whisper promptは224トークン上限。日本語1文字≒1.5トークン目安で約140文字以内に収める
+    let prompt = '会議参加者と関連名詞: ';
+    let buf = '';
+    for (const n of names) {
+        const next = buf ? buf + '、' + n : n;
+        if ((prompt + next).length > 130) break;
+        buf = next;
+    }
+    return prompt + buf + '。';
+}
+
 async function transcribeChunkGroq(blob) {
     if (!settings.groqKey) throw new Error('Groq APIキーが設定されていません');
     const fd = new FormData();
@@ -1091,6 +1120,8 @@ async function transcribeChunkGroq(blob) {
     fd.append('language', 'ja');
     fd.append('response_format', 'text');
     fd.append('temperature', '0');
+    const sttPrompt = buildSTTPrompt();
+    if (sttPrompt) fd.append('prompt', sttPrompt);
     const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${settings.groqKey}` },
@@ -1110,6 +1141,8 @@ async function transcribeChunkOpenAI(blob) {
     fd.append('model', 'whisper-1');
     fd.append('language', 'ja');
     fd.append('response_format', 'text');
+    const sttPrompt = buildSTTPrompt();
+    if (sttPrompt) fd.append('prompt', sttPrompt);
     const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${settings.whisperKey}` },
@@ -1492,6 +1525,119 @@ $('rec-clear').addEventListener('click', () => {
 //==============================================================
 // 11. 音声ファイル文字起こし
 //==============================================================
+//==============================================================
+// 11-A. 誤変換候補の検出（登録名と類似する単語を抽出）
+//==============================================================
+function _isCJK(ch) {
+    const c = ch.charCodeAt(0);
+    return (c >= 0x4E00 && c <= 0x9FFF) || (c >= 0x3400 && c <= 0x4DBF);
+}
+function _hasKanji(s) { for (const ch of s) if (_isCJK(ch)) return true; return false; }
+
+function detectMistranscriptions(text, names) {
+    if (!text || !names || names.length === 0) return [];
+    // 登録名のセット（高速判定用）
+    const registeredSet = new Set(names.map(n => (n.name||'').trim()).filter(Boolean));
+    const candidates = [];
+    const seen = new Set();
+    for (const entry of names) {
+        const correct = (entry.name || '').trim();
+        if (!correct || correct.length < 2) continue;
+        if (text.includes(correct)) continue; // すでに正しく出現
+        const len = correct.length;
+        // 4文字以上の名前のみ許容（誤検出を抑制するため2-3文字の短い名前は厳しめに）
+        const threshold = len >= 4 ? 0.5 : (len === 3 ? 0.67 : 1.0);
+        if (threshold > 0.99) continue; // 2文字名は完全一致以外検出しない
+        for (let i = 0; i <= text.length - len; i++) {
+            const window = text.substr(i, len);
+            if (window === correct) continue;
+            if (registeredSet.has(window)) continue; // 別の登録名と一致するならスキップ
+            if (!_hasKanji(window) && _hasKanji(correct)) continue;
+            // 先頭文字（姓の最初）が一致しない場合スキップ（誤検出抑制）
+            if (correct[0] !== window[0]) continue;
+            let match = 0;
+            for (let j = 0; j < len; j++) if (window[j] === correct[j]) match++;
+            const sim = match / len;
+            if (sim < threshold) continue;
+            if (sim >= 1.0) continue;
+            // 別の登録名の部分文字列だった場合スキップ
+            let isSubstr = false;
+            for (const r of registeredSet) {
+                if (r !== correct && r.includes(window) && text.includes(r)) { isSubstr = true; break; }
+            }
+            if (isSubstr) continue;
+            const key = window + '|' + correct;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            let count = 0; let idx = 0;
+            while ((idx = text.indexOf(window, idx)) !== -1) { count++; idx += window.length; }
+            candidates.push({ wrong: window, correct, sim, count, type: entry.type });
+        }
+    }
+    candidates.sort((a, b) => (b.wrong.length - a.wrong.length) || (b.sim - a.sim));
+    // 既に検出された他候補の wrong を含む短い候補を除去
+    const filtered = [];
+    for (const c of candidates) {
+        const isSub = filtered.some(f => f.wrong.length > c.wrong.length && f.wrong.includes(c.wrong));
+        if (!isSub) filtered.push(c);
+    }
+    filtered.sort((a, b) => (b.sim - a.sim) || (b.count - a.count));
+    return filtered;
+}
+
+function showMistransPanel(candidates) {
+    const panel = $('mistrans-panel');
+    const list = $('mistrans-list');
+    const title = $('mistrans-title');
+    if (!candidates || candidates.length === 0) {
+        panel.style.display = 'none';
+        return;
+    }
+    title.textContent = `🔍 誤変換候補 ${candidates.length}件`;
+    list.innerHTML = '';
+    const typeLabel = { user: '利用者', staff: '職員', facility: '施設', medical: '医療', region: '地域' };
+    candidates.forEach((c, i) => {
+        const row = document.createElement('label');
+        row.style.cssText = 'display:flex; align-items:center; gap:10px; padding:6px 8px; border-bottom:1px solid #fde68a; font-size:0.9rem; cursor:pointer;';
+        const checked = c.sim >= 0.66 ? 'checked' : '';
+        row.innerHTML = `
+            <input type="checkbox" data-idx="${i}" ${checked}>
+            <span style="color:#dc2626; font-family:monospace;">${c.wrong}</span>
+            <span style="color:#6b7280;">→</span>
+            <strong style="color:#059669; font-family:monospace;">${c.correct}</strong>
+            <span style="color:#9ca3af; font-size:0.78rem; margin-left:auto;">${typeLabel[c.type]||''}・${c.count}件・類似${Math.round(c.sim*100)}%</span>
+        `;
+        list.appendChild(row);
+    });
+    list.dataset.candidates = JSON.stringify(candidates);
+    panel.style.display = 'block';
+}
+
+$('btn-mistrans-close').addEventListener('click', () => {
+    $('mistrans-panel').style.display = 'none';
+});
+
+$('btn-mistrans-apply').addEventListener('click', () => {
+    const list = $('mistrans-list');
+    const candidates = JSON.parse(list.dataset.candidates || '[]');
+    const checkboxes = list.querySelectorAll('input[type="checkbox"]:checked');
+    if (checkboxes.length === 0) { alert('置換する候補を選択してください'); return; }
+    let text = $('transcript-upload').value;
+    let total = 0;
+    checkboxes.forEach(cb => {
+        const c = candidates[parseInt(cb.dataset.idx)];
+        if (!c) return;
+        const before = text;
+        text = text.split(c.wrong).join(c.correct);
+        const replaced = (before.length - text.length === 0) ? (before.match(new RegExp(c.wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'))||[]).length : Math.abs(before.length - text.length) / Math.abs(c.wrong.length - c.correct.length);
+        total += c.count;
+    });
+    $('transcript-upload').value = text;
+    $('mistrans-panel').style.display = 'none';
+    showStatus('success', `✅ ${checkboxes.length}種類の誤変換を置換しました（${total}箇所）`);
+    setTimeout(hideStatus, 3000);
+});
+
 $('btn-transcribe').addEventListener('click', async () => {
     const f = $('audio-file').files[0];
     if (!f) { alert('音声ファイルを選択してください'); return; }
@@ -1519,8 +1665,15 @@ $('btn-transcribe').addEventListener('click', async () => {
         const sec = ((Date.now() - startedAt) / 1000).toFixed(0);
         progEl.className = 'status-banner show success';
         progEl.textContent = `✅ 完了（${sec}秒）`;
-        showStatus('success', '✅ 文字起こしが完了しました');
-        setTimeout(hideStatus, 3000);
+        // 誤変換候補を自動検出
+        const candidates = detectMistranscriptions(text, settings.names);
+        showMistransPanel(candidates);
+        if (candidates.length > 0) {
+            showStatus('success', `✅ 文字起こし完了（${candidates.length}件の誤変換候補を検出）`);
+        } else {
+            showStatus('success', '✅ 文字起こしが完了しました');
+        }
+        setTimeout(hideStatus, 4000);
     } catch (e) {
         console.error(e);
         progEl.className = 'status-banner show error';
