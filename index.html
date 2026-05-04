@@ -242,7 +242,7 @@
 
 <header class="app-header">
     <h1>会議録作成アプリ</h1>
-    <p>音声 / 録音 / テキストから 全体会・支援会議・企画会議 を自動生成</p>
+    <p>音声 / 録音 / テキストから 各種会議録 を自動生成</p>
     <div class="header-tools">
         <button id="btn-settings">⚙ 設定</button>
         <button id="btn-help">？ ヘルプ</button>
@@ -253,6 +253,7 @@
     <button class="tab-btn active" data-tab="zentaikai" role="tab">全体会</button>
     <button class="tab-btn" data-tab="shienkaigi" role="tab">支援会議</button>
     <button class="tab-btn" data-tab="kikakukaigi" role="tab">企画会議</button>
+    <button class="tab-btn" data-tab="sonota" role="tab">その他打ち合わせ</button>
 </nav>
 
 <main class="main">
@@ -586,7 +587,7 @@
         <ol style="margin-left:20px; line-height:1.8; font-size:0.9rem;">
             <li>初回のみ「⚙ 設定」から AIプロバイダーとAPIキーを登録</li>
             <li>同じく設定の「匿名化リスト」に利用者様・職員のお名前を登録</li>
-            <li>会議の種類のタブを選択（全体会／支援会議／企画会議）</li>
+            <li>会議の種類のタブを選択（全体会／支援会議／企画会議／その他打ち合わせ）</li>
             <li>STEP1: 期日・出席者などの基本情報を入力</li>
             <li>STEP2: 会議内容を入力（3つの方法から選択）
                 <ul style="margin-left:20px;">
@@ -651,7 +652,7 @@
 // 1. ストレージ・設定管理
 //==============================================================
 const STORAGE_KEY = 'mtg_minutes_v1';
-const DATA_VERSION = '20260503e'; // ← 名前リストを更新したらこの日付を変える
+const DATA_VERSION = '20260503f'; // ← 名前リストを更新したらこの日付を変える
 
 const DEFAULT_NAMES = [
     // ── 施設 ──
@@ -932,6 +933,23 @@ const TEMPLATES = {
 法人運営に関わる重要事項（規程改正、給与、補正予算、採用、研修、寄付、設備、地域連携推進委員会 等）は「事務局連絡会報告」に。
 各施設ごとに以下を含めるよう意識してください: 入退所・体験利用、行事（クリスマス会等）、ヒヤリハット、事故報告、他害、医療（CT・通院・服薬調整）。
 細かい支援方針の話（誤薬対策・服薬支援中の私語禁止・身体援助講習会など）は「3. 支援関係」へ。`
+    },
+    sonota: {
+        title: 'その他打ち合わせ',
+        sections: [
+            '1. 議題',
+            '2. 議論内容',
+            '3. 決定事項',
+            '4. 次回までの宿題',
+            '5. その他'
+        ],
+        guidance: `「その他打ち合わせ」のテンプレートに従い、5セクションに整理してください。
+・「議題」は何について話し合ったかを箇条書きで簡潔に
+・「議論内容」は主なやり取りや論点を要点でまとめる（発言録は不要、要約で）
+・「決定事項」は会議で決まったことだけを箇条書きで明確に
+・「次回までの宿題」は誰が何をいつまでにやるかを「担当者：内容（期限）」の形式で記載
+・「その他」は補足事項や次回開催予定など
+小規模な職員ミーティング向けのため、簡潔で実用的な記録を心がけてください。`
     }
 };
 
