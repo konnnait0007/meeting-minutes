@@ -344,6 +344,22 @@
                 25MBを超えるファイル（スマホ録音120分など）は <strong>ブラウザ内で自動的に16kHzモノラルに圧縮・分割</strong> してから送信します。手動圧縮は不要です。<br>
                 完全無料の文字起こしには「⚙ 設定 → APIキー」で Groq APIキーの登録が必要です（メアド登録のみ・5分）。
             </div>
+            <details style="margin-top:8px; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; padding:8px 12px;">
+                <summary style="cursor:pointer; font-weight:600; color:#065f46; font-size:0.88rem;">💡 文字起こし精度を上げる録音のコツ</summary>
+                <ul style="font-size:0.85rem; color:#065f46; line-height:1.7; margin:8px 0 4px 20px;">
+                    <li><strong>スマホは机の中央に置く</strong>（手で持つと特定の人の声しか拾えません）</li>
+                    <li><strong>マイク面を上に</strong>向ける（ケースで塞がないこと）</li>
+                    <li><strong>1人ずつ発言する</strong>ルールにする（同時発言は文字起こしできません）</li>
+                    <li><strong>エアコン・換気扇は弱めに</strong>（低周波ノイズは音声を埋もれさせます）</li>
+                    <li><strong>固有名詞は復唱する</strong>（「○○さん、つまり○○さんですね」）</li>
+                    <li><strong>10人以上の会議では2台で録音</strong>（片方を反対側に置く）</li>
+                    <li>録音アプリは <strong>WAV または高品質MP3（128kbps以上）</strong> 推奨</li>
+                </ul>
+            </details>
+            <label style="display:flex; align-items:center; gap:8px; margin-top:10px; font-size:0.85rem; color:#374151;">
+                <input type="checkbox" id="cfg-audio-preprocess" checked>
+                音声を自動最適化する（音量正規化・低域ノイズ除去・推奨）
+            </label>
             <div class="btn-row" style="margin-top:10px;">
                 <button class="btn btn-primary" id="btn-transcribe">📝 文字起こしを実行</button>
             </div>
@@ -635,7 +651,7 @@
 // 1. ストレージ・設定管理
 //==============================================================
 const STORAGE_KEY = 'mtg_minutes_v1';
-const DATA_VERSION = '20260503d'; // ← 名前リストを更新したらこの日付を変える
+const DATA_VERSION = '20260503e'; // ← 名前リストを更新したらこの日付を変える
 
 const DEFAULT_NAMES = [
     // ── 施設 ──
@@ -781,6 +797,7 @@ const defaultSettings = () => ({
     whisperKey: '',
     extraPrompt: '',
     glossary: '',
+    audioPreprocess: true, // 音声前処理を自動で行うか
     names: [],  // {type, name, note}
     dataVersion: ''
 });
@@ -1082,33 +1099,85 @@ function encodeWAV(samples, sampleRate) {
     return new Blob([buffer], { type: 'audio/wav' });
 }
 
+// 音量正規化: ピークを0.95に揃えて聞き取りやすくする（小さい音声を増幅）
+function normalizeAudio(samples) {
+    let max = 0;
+    for (let i = 0; i < samples.length; i++) {
+        const v = Math.abs(samples[i]);
+        if (v > max) max = v;
+    }
+    if (max < 0.001 || max >= 0.95) return samples; // 無音 or すでに大きい音は変更不要
+    const gain = Math.min(0.95 / max, 8); // 最大8倍まで増幅（過度なノイズ増幅を防ぐ）
+    const out = new Float32Array(samples.length);
+    for (let i = 0; i < samples.length; i++) out[i] = samples[i] * gain;
+    return out;
+}
+
+// ハイパスフィルタ: 80Hz以下の低域ノイズ（エアコン音、暗騒音、ハム音）を除去
+function highPassFilter(samples, sampleRate, cutoffHz = 80) {
+    const rc = 1.0 / (cutoffHz * 2 * Math.PI);
+    const dt = 1.0 / sampleRate;
+    const alpha = rc / (rc + dt);
+    const out = new Float32Array(samples.length);
+    out[0] = samples[0];
+    let prevIn = samples[0];
+    let prevOut = samples[0];
+    for (let i = 1; i < samples.length; i++) {
+        prevOut = alpha * (prevOut + samples[i] - prevIn);
+        out[i] = prevOut;
+        prevIn = samples[i];
+    }
+    return out;
+}
+
 function chunkSamples(samples, sampleRate, maxBytes) {
     // 16-bit PCM → 2 bytes/sample。WAVヘッダ44バイト分の余裕をみる
     const maxSamples = Math.floor((maxBytes - 44) / 2);
+    // チャンク境界での単語分断を防ぐためのオーバーラップ（2秒）
+    const overlapSamples = sampleRate * 2;
     const chunks = [];
-    for (let start = 0; start < samples.length; start += maxSamples) {
+    if (samples.length <= maxSamples) {
+        chunks.push({
+            blob: encodeWAV(samples, sampleRate),
+            startSec: 0,
+            durSec: samples.length / sampleRate
+        });
+        return chunks;
+    }
+    let start = 0;
+    while (start < samples.length) {
         const end = Math.min(start + maxSamples, samples.length);
         chunks.push({
             blob: encodeWAV(samples.subarray(start, end), sampleRate),
             startSec: start / sampleRate,
             durSec: (end - start) / sampleRate
         });
+        if (end === samples.length) break;
+        start = end - overlapSamples; // 次チャンクは2秒前から
     }
     return chunks;
 }
 
 async function preprocessForSTT(file, onProgress) {
-    // 25MB以下なら無加工で投げる
-    if (file.size <= MAX_CHUNK_BYTES) {
-        onProgress && onProgress('そのまま送信できるサイズです');
+    // 前処理を有効化したい / ファイルサイズ超過 → デコード→ノイズ除去→正規化→16kHz変換
+    const needPreprocess = settings.audioPreprocess !== false || file.size > MAX_CHUNK_BYTES;
+    if (!needPreprocess) {
+        onProgress && onProgress('前処理なしで送信します');
         return [{ blob: file, startSec: 0, durSec: null }];
     }
-    onProgress && onProgress('ブラウザ内で音声を圧縮中…（16kHzモノラル変換）');
+    onProgress && onProgress('音声を最適化中…（音量正規化・低域ノイズ除去・16kHz変換）');
     const audioBuf = await decodeAudio(file);
     const resampled = await resampleToMono16k(audioBuf);
-    const samples = resampled.getChannelData(0);
+    let samples = resampled.getChannelData(0);
+    samples = highPassFilter(samples, TARGET_SAMPLE_RATE, 80); // 低域ノイズ除去
+    samples = normalizeAudio(samples); // 音量正規化（小さい音声を増幅）
     const chunks = chunkSamples(samples, TARGET_SAMPLE_RATE, MAX_CHUNK_BYTES);
-    onProgress && onProgress(`${chunks.length}個のチャンクに分割しました（合計 ${(audioBuf.duration / 60).toFixed(1)}分）`);
+    const durMin = (audioBuf.duration / 60).toFixed(1);
+    if (chunks.length > 1) {
+        onProgress && onProgress(`${chunks.length}個のチャンクに分割しました（合計 ${durMin}分・2秒オーバーラップ付）`);
+    } else {
+        onProgress && onProgress(`音声を最適化しました（${durMin}分）`);
+    }
     return chunks;
 }
 
@@ -1659,6 +1728,9 @@ $('btn-mistrans-apply').addEventListener('click', () => {
 $('btn-transcribe').addEventListener('click', async () => {
     const f = $('audio-file').files[0];
     if (!f) { alert('音声ファイルを選択してください'); return; }
+    // チェックボックスの状態を反映
+    settings.audioPreprocess = $('cfg-audio-preprocess').checked;
+    saveSettings();
     const provider = settings.sttProvider || 'groq';
     if (provider === 'groq' && !settings.groqKey) {
         alert('設定 → APIキー で Groq APIキーを登録してください\nhttps://console.groq.com/keys で無料発行できます');
@@ -2037,6 +2109,10 @@ function init() {
     $('meta-date').value = t.toISOString().slice(0,10);
     setupRecognition();  // 利用可否チェック
     updateModelInfo();
+    // 音声前処理チェックボックスの状態を反映
+    if ($('cfg-audio-preprocess')) {
+        $('cfg-audio-preprocess').checked = settings.audioPreprocess !== false;
+    }
 
     // 初回起動時はヘルプを開く
     if (!localStorage.getItem(STORAGE_KEY)) {
