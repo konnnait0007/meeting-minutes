@@ -652,7 +652,7 @@
 // 1. ストレージ・設定管理
 //==============================================================
 const STORAGE_KEY = 'mtg_minutes_v1';
-const DATA_VERSION = '20260503g'; // ← 名前リストを更新したらこの日付を変える
+const DATA_VERSION = '20260503h'; // ← 名前リストを更新したらこの日付を変える
 
 const DEFAULT_NAMES = [
     // ── 施設 ──
@@ -1206,29 +1206,62 @@ function highPassFilter(samples, sampleRate, cutoffHz = 80) {
 function chunkSamples(samples, sampleRate, maxBytes) {
     // 16-bit PCM → 2 bytes/sample。WAVヘッダ44バイト分の余裕をみる
     const maxSamples = Math.floor((maxBytes - 44) / 2);
-    // チャンク境界での単語分断を防ぐためのオーバーラップ（2秒）
-    const overlapSamples = sampleRate * 2;
     const chunks = [];
-    if (samples.length <= maxSamples) {
-        chunks.push({
-            blob: encodeWAV(samples, sampleRate),
-            startSec: 0,
-            durSec: samples.length / sampleRate
-        });
-        return chunks;
-    }
+    // オーバーラップなしで分割する（重複文字起こしを防ぐため）。
+    // 境界での単語分断を最小化するため、無音に近い位置でカットする。
     let start = 0;
     while (start < samples.length) {
-        const end = Math.min(start + maxSamples, samples.length);
+        let end = Math.min(start + maxSamples, samples.length);
+        // 最終チャンクでなければ、末尾付近で最も静かな位置を探してそこでカット
+        if (end < samples.length) {
+            end = findQuietCut(samples, end, sampleRate);
+        }
         chunks.push({
             blob: encodeWAV(samples.subarray(start, end), sampleRate),
             startSec: start / sampleRate,
             durSec: (end - start) / sampleRate
         });
-        if (end === samples.length) break;
-        start = end - overlapSamples; // 次チャンクは2秒前から
+        if (end >= samples.length) break;
+        start = end; // 重複なしで次へ
     }
     return chunks;
+}
+
+// 指定位置の手前約3秒の範囲で「最も音量が小さい0.1秒窓」を探し、そこを区切り位置にする。
+// 単語の途中での分断を避ける（無音=発話の切れ目でカットする）。
+function findQuietCut(samples, targetEnd, sampleRate) {
+    const searchBack = Math.min(sampleRate * 3, targetEnd); // 手前3秒を探索
+    const win = Math.max(1, Math.floor(sampleRate * 0.1));  // 0.1秒窓
+    let bestPos = targetEnd;
+    let bestEnergy = Infinity;
+    for (let pos = targetEnd - win; pos > targetEnd - searchBack; pos -= win) {
+        if (pos < 0) break;
+        let energy = 0;
+        for (let i = pos; i < pos + win; i++) energy += Math.abs(samples[i]);
+        if (energy < bestEnergy) { bestEnergy = energy; bestPos = pos + win; }
+    }
+    return bestPos;
+}
+
+// 文字起こし結果のクリーニング：繰り返し（Whisperのループ現象・チャンク境界の重複）を除去
+function cleanTranscript(text) {
+    if (!text) return text;
+    // 1) 連続する同一行を1行に圧縮
+    const lines = text.split(/\r?\n/);
+    const dedupLines = [];
+    for (const line of lines) {
+        const t = line.trim();
+        if (t && dedupLines.length && dedupLines[dedupLines.length - 1].trim() === t) continue;
+        dedupLines.push(line);
+    }
+    let result = dedupLines.join('\n');
+    // 2) 同一フレーズ（2〜40文字）が3回以上連続するループを1回に圧縮
+    //    例:「ありがとうございますありがとうございますありがとうございます」→「ありがとうございます」
+    result = result.replace(/(.{2,40}?)\1{2,}/g, '$1');
+    // 3) 句読点・空白区切りで同じ短い語が4回以上続く場合も圧縮
+    //    例:「はい、はい、はい、はい、」→「はい、」
+    result = result.replace(/(.{1,12}?[、。\s])\1{3,}/g, '$1');
+    return result.trim();
 }
 
 async function preprocessForSTT(file, onProgress) {
@@ -1247,7 +1280,7 @@ async function preprocessForSTT(file, onProgress) {
     const chunks = chunkSamples(samples, TARGET_SAMPLE_RATE, MAX_CHUNK_BYTES);
     const durMin = (audioBuf.duration / 60).toFixed(1);
     if (chunks.length > 1) {
-        onProgress && onProgress(`${chunks.length}個のチャンクに分割しました（合計 ${durMin}分・2秒オーバーラップ付）`);
+        onProgress && onProgress(`${chunks.length}個のチャンクに分割しました（合計 ${durMin}分・無音位置でカット）`);
     } else {
         onProgress && onProgress(`音声を最適化しました（${durMin}分）`);
     }
@@ -1321,12 +1354,14 @@ async function transcribeAudio(file, onProgress) {
     const results = [];
     for (let i = 0; i < chunks.length; i++) {
         onProgress && onProgress(`文字起こし中… (${i + 1}/${chunks.length})`);
-        const txt = provider === 'openai'
+        let txt = provider === 'openai'
             ? await transcribeChunkOpenAI(chunks[i].blob)
             : await transcribeChunkGroq(chunks[i].blob);
+        txt = cleanTranscript(txt); // チャンクごとに繰り返しを除去
         results.push(txt);
     }
-    return results.join('\n');
+    // 全チャンク結合後にもう一度クリーニング（境界をまたぐ重複に対応）
+    return cleanTranscript(results.join('\n'));
 }
 
 //==============================================================
