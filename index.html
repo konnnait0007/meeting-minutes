@@ -314,7 +314,7 @@
             <div class="help">手書きメモを入力する場合も、できるだけ会議で出た固有名詞・日付・数字・決定事項を残してください。</div>
         </div>
 
-        <!-- ライブ録音モード -->
+        <!-- ライブ録音モード（サウンドレコーダー方式） -->
         <div class="input-panel" data-panel="record">
             <div class="recording-status" id="rec-status">
                 <span class="rec-dot"></span>
@@ -324,15 +324,16 @@
             <div class="btn-row" style="margin-bottom:10px;">
                 <button class="btn btn-primary" id="rec-start">🎙 録音開始</button>
                 <button class="btn btn-danger" id="rec-stop" disabled>■ 停止</button>
+                <button class="btn btn-secondary" id="rec-save-audio" disabled>🎵 音声を保存</button>
                 <button class="btn btn-secondary" id="rec-clear">クリア</button>
             </div>
-            <div class="interim" id="rec-interim">（録音中の最新発言がここに表示されます）</div>
-            <label style="margin-top:14px;">これまでの認識結果</label>
-            <textarea id="transcript-record" rows="10" placeholder="録音を開始すると認識結果がここに追記されます"></textarea>
+            <div class="interim" id="rec-progress">（録音を開始すると、5分ごとに自動で文字起こしされます）</div>
+            <label style="margin-top:14px;">文字起こし結果</label>
+            <textarea id="transcript-record" rows="10" placeholder="録音を開始すると、5分ごとに文字起こし結果がここに追記されます"></textarea>
             <div class="help">
-                ⚠ Chrome / Edge ブラウザ専用です。マイクの許可が必要です。
-                Web Speech API（Google提供・無料）を利用しているため、認識精度はインターネット接続と話者距離に依存します。
-                長時間録音中はタブを閉じないでください。
+                🎙 サウンドレコーダー方式: 録音はブラウザ内に確実に保存され、<strong>5分ごとに自動で文字起こし</strong>されます（沈黙で途切れる心配はありません）。<br>
+                文字起こしには「⚙ 設定 → APIキー」で <strong>Groq APIキー（無料）</strong>の登録が必要です。マイクの許可が必要です。<br>
+                停止後「🎵 音声を保存」で録音ファイルをPCに保存できます（文字起こしに失敗した場合の保険）。録音中はタブを閉じないでください。
             </div>
         </div>
 
@@ -592,9 +593,9 @@
             <li>STEP2: 会議内容を入力（3つの方法から選択）
                 <ul style="margin-left:20px;">
                     <li><strong>テキスト貼付</strong>: Teams等の文字起こしを貼る（一番手軽）</li>
-                    <li><strong>ライブ録音</strong>: 会議中にPCで録音→自動文字起こし<br>
-                        <span style="font-size:0.85em; color:#92400e;">※ 長い沈黙の後は再接続が入り、その一瞬の音声は拾えません。確実に残したい会議は「音声ファイル」タブ（録音ファイルをアップロード）の併用がおすすめです。</span></li>
-                    <li><strong>音声ファイル</strong>: 録音済みMP3等をアップロード（要OpenAIキー）</li>
+                    <li><strong>ライブ録音</strong>: 会議中にPCで録音→5分ごとに自動文字起こし<br>
+                        <span style="font-size:0.85em; color:#065f46;">※ サウンドレコーダー方式で確実に録音され、沈黙で途切れる心配はありません。停止後に音声ファイルの保存もできます（要Groqキー・無料）。</span></li>
+                    <li><strong>音声ファイル</strong>: 録音済みMP3等をアップロード（要Groqキー・無料）</li>
                 </ul>
             </li>
             <li>STEP3: 「会議録を生成」ボタンを押す</li>
@@ -645,6 +646,34 @@
     <div class="dialog-footer">
         <button class="btn btn-secondary" id="btn-copy-anon">📋 匿名化テキストをコピー</button>
         <button class="btn btn-primary" data-close="anon-preview-dialog">閉じる</button>
+    </div>
+</dialog>
+
+<dialog id="template-dialog" style="max-width:640px; width:92vw;">
+    <div class="dialog-header">
+        <h2 id="tpl-dialog-title">＋ テンプレート作成</h2>
+        <button class="close-btn" data-close="template-dialog">✕</button>
+    </div>
+    <div class="dialog-body">
+        <div class="field">
+            <label>テンプレート名</label>
+            <input type="text" id="tpl-name" placeholder="例: 給食会議、リーダー会議">
+        </div>
+        <label>会議項目を選択（クリックで追加）</label>
+        <div id="tpl-library" style="display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 14px;"></div>
+        <div class="field">
+            <label>自由項目を追加</label>
+            <div style="display:flex; gap:8px;">
+                <input type="text" id="tpl-custom-item" placeholder="例: 献立の検討、設備点検報告">
+                <button type="button" class="btn btn-secondary" id="tpl-add-item" style="flex:0 0 auto;">＋追加</button>
+            </div>
+        </div>
+        <label>選択済み項目（この順番で会議録になります）</label>
+        <div id="tpl-selected" style="margin-top:8px;"></div>
+    </div>
+    <div class="dialog-footer">
+        <button class="btn btn-secondary" data-close="template-dialog">キャンセル</button>
+        <button class="btn btn-primary" id="tpl-save">保存</button>
     </div>
 </dialog>
 
@@ -800,6 +829,7 @@ const defaultSettings = () => ({
     extraPrompt: '',
     glossary: '',
     audioPreprocess: true, // 音声前処理を自動で行うか
+    customTemplates: [],   // {id, title, sections, guidance} ユーザー作成テンプレ
     names: [],  // {type, name, note}
     dataVersion: ''
 });
@@ -1009,8 +1039,13 @@ const TEMPLATES = {
     }
 };
 
+// 組み込みテンプレ or ユーザー作成テンプレを取得
+function getTemplate(id) {
+    return TEMPLATES[id] || (settings.customTemplates || []).find(t => t.id === id) || TEMPLATES.zentaikai;
+}
+
 function buildPrompt(tab, meta, transcript) {
-    const tpl = TEMPLATES[tab];
+    const tpl = getTemplate(tab);
     const sections = tpl.sections.map(s => `  ${s}`).join('\n');
     const extra = settings.extraPrompt ? `\n\n■追加の指示\n${settings.extraPrompt}` : '';
     const glossary = settings.glossary ? `\n\n■組織固有の用語・定型文\n${settings.glossary}` : '';
@@ -1437,13 +1472,193 @@ function getMeta() {
 }
 
 //==============================================================
-// 7. タブ・モード切替
+// 7. タブ・モード切替（カスタムテンプレ対応の動的描画）
 //==============================================================
-$$('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-        $$('.tab-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
+const BUILTIN_TABS = ['zentaikai', 'shienkaigi', 'kikakukaigi', 'sonota'];
+
+function activateTab(btn) {
+    $$('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+}
+
+function renderTabs() {
+    const nav = document.querySelector('nav.tabs');
+    const current = getCurrentTab();
+    nav.innerHTML = '';
+    const makeBtn = (id, title, isCustom) => {
+        const b = document.createElement('button');
+        b.className = 'tab-btn';
+        b.dataset.tab = id;
+        b.setAttribute('role', 'tab');
+        b.appendChild(document.createTextNode(title));
+        if (isCustom) {
+            const edit = document.createElement('span');
+            edit.textContent = ' ✎';
+            edit.title = 'このテンプレを編集';
+            edit.style.cssText = 'opacity:0.55; font-size:0.85em; cursor:pointer;';
+            edit.addEventListener('click', (e) => { e.stopPropagation(); openTemplateDialog(id); });
+            b.appendChild(edit);
+            const del = document.createElement('span');
+            del.textContent = ' ✕';
+            del.title = 'このテンプレを削除';
+            del.style.cssText = 'opacity:0.55; font-size:0.85em; cursor:pointer; color:#dc2626;';
+            del.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const tpl = getTemplate(id);
+                if (!confirm(`テンプレート「${tpl.title}」を削除しますか？`)) return;
+                settings.customTemplates = (settings.customTemplates || []).filter(t => t.id !== id);
+                saveSettings();
+                renderTabs();
+            });
+            b.appendChild(del);
+        }
+        b.addEventListener('click', () => activateTab(b));
+        nav.appendChild(b);
+        return b;
+    };
+    BUILTIN_TABS.forEach(id => makeBtn(id, TEMPLATES[id].title, false));
+    (settings.customTemplates || []).forEach(t => makeBtn(t.id, t.title, true));
+    // テンプレ作成ボタン
+    const add = document.createElement('button');
+    add.className = 'tab-btn';
+    add.id = 'btn-add-template';
+    add.style.cssText = 'flex:0 0 auto; color:#4f46e5;';
+    add.title = '会議項目を選んで新しいテンプレートを作成';
+    add.textContent = '＋';
+    add.addEventListener('click', () => openTemplateDialog(null));
+    nav.appendChild(add);
+    // アクティブタブ復元（削除された場合は全体会へ）
+    const target = nav.querySelector(`[data-tab="${current}"]`) || nav.querySelector('[data-tab="zentaikai"]');
+    if (target) target.classList.add('active');
+}
+
+//==============================================================
+// 7-B. カスタムテンプレート作成/編集ダイアログ
+//==============================================================
+const TPL_ITEM_LIBRARY = [
+    '議題', '決定事項', '議論内容', '次回までの宿題',
+    '事務局連絡会報告', '連絡事項', '協議事項', '行事',
+    '支援関係', '医療関係', '食事関係', '事務関係',
+    'ヒヤリ・事故報告', '短期入所・日中一時', '医務より',
+    '利用者さんについて', '避難訓練振り返り', 'その他'
+];
+const TPL_GENERIC_GUIDANCE = `各項目は「・」で始まる箇条書き。決定事項・連絡事項・申し送りとして簡潔に。
+利用者様の名前は「○○様」、職員は役職+苗字（例: 石井部長）で表記。
+該当する内容が会議で触れられていない項目は「特になし」と記載。`;
+
+let tplEditingId = null;  // 編集中テンプレのid（新規はnull）
+let tplItems = [];        // 選択済み項目（番号なしの見出し文字列）
+
+function renderTplLibrary() {
+    const box = $('tpl-library');
+    box.innerHTML = '';
+    TPL_ITEM_LIBRARY.forEach(item => {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'btn btn-secondary';
+        chip.style.cssText = 'font-size:0.82rem; padding:5px 10px;' + (tplItems.includes(item) ? ' opacity:0.4;' : '');
+        chip.textContent = '＋ ' + item;
+        chip.disabled = tplItems.includes(item);
+        chip.addEventListener('click', () => {
+            tplItems.push(item);
+            renderTplLibrary();
+            renderTplSelected();
+        });
+        box.appendChild(chip);
     });
+}
+
+function renderTplSelected() {
+    const box = $('tpl-selected');
+    box.innerHTML = '';
+    if (tplItems.length === 0) {
+        box.innerHTML = '<div style="color:#9ca3af; font-size:0.85rem; padding:8px;">（上の項目をクリック、または自由項目を追加してください）</div>';
+        return;
+    }
+    tplItems.forEach((item, i) => {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex; align-items:center; gap:8px; padding:6px 10px; background:#f9fafb; border:1px solid #e5e7eb; border-radius:6px; margin-bottom:4px; font-size:0.9rem;';
+        const num = document.createElement('span');
+        num.style.cssText = 'color:#4f46e5; font-weight:700; min-width:24px;';
+        num.textContent = (i + 1) + '.';
+        const label = document.createElement('span');
+        label.style.flex = '1';
+        label.textContent = item;
+        const up = document.createElement('button');
+        up.type = 'button'; up.className = 'btn btn-ghost'; up.style.cssText = 'padding:2px 8px; font-size:0.8rem;';
+        up.textContent = '↑'; up.disabled = i === 0;
+        up.addEventListener('click', () => { [tplItems[i-1], tplItems[i]] = [tplItems[i], tplItems[i-1]]; renderTplSelected(); });
+        const down = document.createElement('button');
+        down.type = 'button'; down.className = 'btn btn-ghost'; down.style.cssText = 'padding:2px 8px; font-size:0.8rem;';
+        down.textContent = '↓'; down.disabled = i === tplItems.length - 1;
+        down.addEventListener('click', () => { [tplItems[i], tplItems[i+1]] = [tplItems[i+1], tplItems[i]]; renderTplSelected(); });
+        const del = document.createElement('button');
+        del.type = 'button'; del.className = 'btn btn-ghost'; del.style.cssText = 'padding:2px 8px; font-size:0.8rem; color:#dc2626;';
+        del.textContent = '✕';
+        del.addEventListener('click', () => { tplItems.splice(i, 1); renderTplLibrary(); renderTplSelected(); });
+        row.append(num, label, up, down, del);
+        box.appendChild(row);
+    });
+}
+
+function openTemplateDialog(editId) {
+    tplEditingId = editId;
+    if (editId) {
+        const tpl = getTemplate(editId);
+        $('tpl-dialog-title').textContent = '✎ テンプレートを編集';
+        $('tpl-name').value = tpl.title;
+        // 保存時に付けた「1. 」等の連番を外して項目名に戻す
+        tplItems = tpl.sections.map(s => s.replace(/^\d+\.\s*/, ''));
+    } else {
+        $('tpl-dialog-title').textContent = '＋ テンプレート作成';
+        $('tpl-name').value = '';
+        tplItems = [];
+    }
+    $('tpl-custom-item').value = '';
+    renderTplLibrary();
+    renderTplSelected();
+    $('template-dialog').showModal();
+}
+
+$('tpl-add-item').addEventListener('click', () => {
+    const v = $('tpl-custom-item').value.trim();
+    if (!v) return;
+    if (tplItems.includes(v)) { alert('同じ項目が既に追加されています'); return; }
+    tplItems.push(v);
+    $('tpl-custom-item').value = '';
+    renderTplLibrary();
+    renderTplSelected();
+});
+$('tpl-custom-item').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); $('tpl-add-item').click(); }
+});
+
+$('tpl-save').addEventListener('click', () => {
+    const name = $('tpl-name').value.trim();
+    if (!name) { alert('テンプレート名を入力してください'); return; }
+    if (tplItems.length === 0) { alert('会議項目を1つ以上選択してください'); return; }
+    const sections = tplItems.map((s, i) => `${i + 1}. ${s}`);
+    if (!settings.customTemplates) settings.customTemplates = [];
+    if (tplEditingId) {
+        const idx = settings.customTemplates.findIndex(t => t.id === tplEditingId);
+        if (idx >= 0) settings.customTemplates[idx] = { ...settings.customTemplates[idx], title: name, sections };
+    } else {
+        settings.customTemplates.push({
+            id: 'ct_' + Date.now(),
+            title: name,
+            sections,
+            guidance: TPL_GENERIC_GUIDANCE
+        });
+    }
+    const ok = saveSettings();
+    renderTabs();
+    // 保存したテンプレのタブをアクティブに
+    const newId = tplEditingId || settings.customTemplates[settings.customTemplates.length - 1].id;
+    const btn = document.querySelector(`.tab-btn[data-tab="${newId}"]`);
+    if (btn) activateTab(btn);
+    $('template-dialog').close();
+    showStatus('success', ok ? `✅ テンプレート「${name}」を保存しました` : `⚠ 保存しましたが、ブラウザへの永続化に失敗しました`);
+    setTimeout(hideStatus, 3000);
 });
 
 $$('.input-mode').forEach(btn => {
@@ -1655,142 +1870,185 @@ $('btn-load-defaults').addEventListener('click', () => {
 });
 
 //==============================================================
-// 10. ライブ録音（Web Speech API）
+// 10. ライブ録音（サウンドレコーダー方式: MediaRecorder + Whisper）
 //==============================================================
-let recognition = null;
-let recStarting = false;
-let recManuallyStopped = false;
+const SEGMENT_MS = 5 * 60 * 1000;   // 5分ごとに区切って文字起こし
+
+let mediaStream = null;        // マイクのストリーム
+let backupRecorder = null;     // 連続録音（バックアップ用・1セッションで完結した再生可能webmになる）
+let segmentRecorder = null;    // 5分ごとに再起動する文字起こし用レコーダー
+let backupChunks = [];         // バックアップ用チャンク
+let segTimer = null;           // セグメント区切りタイマー
+let segCount = 0;              // セグメント通番
+let segDone = 0;               // 文字起こし完了数
+let segFailed = 0;             // 文字起こし失敗数
+let sttQueue = Promise.resolve(); // 文字起こしの直列実行キュー
+let recRunning = false;        // 録音中フラグ
 let recStartedAt = null;
 let recDurationTimer = null;
-let recActive = false;       // 録音すべき状態か（手動停止までtrue）
-let recRestartAttempts = 0;  // 連続再開試行カウンタ
-let recRestartTimer = null;  // 再開リトライ用タイマー
 
-function setupRecognition() {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) {
-        $('rec-start').disabled = true;
-        $('rec-status-text').textContent = 'お使いのブラウザは音声認識に未対応です（Chrome/Edge推奨）';
-        return null;
-    }
-    const r = new SR();
-    r.lang = 'ja-JP';
-    r.continuous = true;
-    r.interimResults = true;
-    r.maxAlternatives = 1;
-
-    r.onresult = (e) => {
-        // 正常に結果が来た＝接続が安定しているサイン。再開カウンタをリセット
-        recRestartAttempts = 0;
-        if (recActive) $('rec-status-text').textContent = '録音中…';
-        let interim = '';
-        let final = '';
-        for (let i = e.resultIndex; i < e.results.length; i++) {
-            const t = e.results[i][0].transcript;
-            if (e.results[i].isFinal) final += t;
-            else interim += t;
-        }
-        if (final) {
-            const ta = $('transcript-record');
-            ta.value += (ta.value && !ta.value.endsWith('\n') ? '\n' : '') + final.trim() + '\n';
-            ta.scrollTop = ta.scrollHeight;
-        }
-        $('rec-interim').textContent = interim || '（…）';
-    };
-    r.onerror = (e) => {
-        console.warn('Speech recognition error', e.error);
-        // マイク権限拒否系は再開ループに入らず明確に通知して停止
-        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-            recActive = false;
-            recManuallyStopped = true;
-            $('rec-status-text').textContent = '⚠ マイクの使用が許可されていません。ブラウザのアドレスバー左の鍵マークからマイクを「許可」にしてください。';
-            return;
-        }
-        // no-speech / aborted は通常運用（沈黙等）。画面エラー表示せず onend の再開に任せる
-        if (e.error === 'no-speech' || e.error === 'aborted') return;
-        // その他のエラーは表示するが、onend での再開は継続する
-        $('rec-status-text').textContent = `エラー: ${e.error}（再接続を試みます）`;
-    };
-    r.onend = () => {
-        // 手動停止時はクリーンアップして終了
-        if (!recActive) {
-            $('rec-status').classList.remove('recording');
-            $('rec-status-text').textContent = 'マイクは停止中です';
-            $('rec-start').disabled = false;
-            $('rec-stop').disabled = true;
-            if (recDurationTimer) { clearInterval(recDurationTimer); recDurationTimer = null; }
-            if (recRestartTimer) { clearTimeout(recRestartTimer); recRestartTimer = null; }
-            return;
-        }
-        // 録音継続中の自動再開（長い沈黙・長時間録音対策）
-        attemptRestart();
-    };
-    return r;
+function recMimeType() {
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) return 'audio/webm;codecs=opus';
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported('audio/webm')) return 'audio/webm';
+    return ''; // ブラウザ既定に任せる
 }
 
-// onend 後に録音を再開する。失敗したら0.3秒間隔で最大20回リトライ（約6秒粘る）
-function attemptRestart() {
-    if (!recActive || !recognition) return;
-    try {
-        recognition.start();
-        // start() 成功（例外なし）→ onresult が来れば onresult側でカウンタリセット＆表示更新
-    } catch (err) {
-        // InvalidStateError 等。少し待って再試行
-        recRestartAttempts++;
-        if (recRestartAttempts <= 20) {
-            $('rec-status-text').textContent = '🔄 再接続中…（この間の音声は拾えません）';
-            recRestartTimer = setTimeout(attemptRestart, 300);
-        } else {
-            // 粘っても復帰できなかった → 停止して再開を促す
-            recActive = false;
-            recManuallyStopped = true;
-            $('rec-status').classList.remove('recording');
-            $('rec-status-text').textContent = '⚠ 再接続できませんでした。「録音開始」ボタンをもう一度押してください。';
-            $('rec-start').disabled = false;
-            $('rec-stop').disabled = true;
-            if (recDurationTimer) { clearInterval(recDurationTimer); recDurationTimer = null; }
-            recRestartAttempts = 0;
+function recSetProgress(msg) { $('rec-progress').textContent = msg; }
+
+// セグメントBlobを直列キューで文字起こしし、結果をtextareaへ追記
+function enqueueSegment(blob, segNo) {
+    sttQueue = sttQueue.then(async () => {
+        recSetProgress(`セグメント${segNo}/${segCount} 文字起こし中…`);
+        try {
+            const file = new File([blob], `segment${segNo}.webm`, { type: blob.type || 'audio/webm' });
+            const text = await transcribeAudio(file, (msg) => {
+                recSetProgress(`セグメント${segNo}/${segCount}: ${msg}`);
+            });
+            if (text && text.trim()) {
+                const ta = $('transcript-record');
+                ta.value += (ta.value && !ta.value.endsWith('\n') ? '\n' : '') + text.trim() + '\n';
+                ta.scrollTop = ta.scrollHeight;
+            }
+            segDone++;
+            recSetProgress(recRunning
+                ? `✅ セグメント${segNo} 完了（録音継続中）`
+                : `✅ 文字起こし完了（${segDone}/${segCount}セグメント）`);
+        } catch (e) {
+            console.error('segment transcription failed', e);
+            segFailed++;
+            recSetProgress(`⚠ セグメント${segNo}の文字起こしに失敗しました（停止後「🎵 音声を保存」で音声を確保できます）: ${e.message}`);
         }
-    }
+        // 全セグメント処理が終わったら誤変換候補を検出
+        if (!recRunning && (segDone + segFailed) >= segCount && segCount > 0) {
+            const candidates = detectMistranscriptions($('transcript-record').value, settings.names);
+            showMistransPanel(candidates, 'transcript-record');
+            if (segFailed > 0) {
+                showStatus('error', `⚠ ${segFailed}件のセグメントが失敗しました。「🎵 音声を保存」→「音声ファイル」タブで再文字起こしできます`);
+            } else if (candidates.length > 0) {
+                showStatus('success', `✅ 文字起こし完了（${candidates.length}件の誤変換候補を検出）`);
+                setTimeout(hideStatus, 4000);
+            } else {
+                showStatus('success', '✅ 文字起こしが完了しました');
+                setTimeout(hideStatus, 4000);
+            }
+        }
+    });
+}
+
+// セグメントレコーダーを起動（onstopで完結Blobを文字起こしキューへ）
+function startSegmentRecorder() {
+    if (!mediaStream) return;
+    const segChunks = [];
+    segmentRecorder = new MediaRecorder(mediaStream, recMimeType() ? { mimeType: recMimeType() } : undefined);
+    segmentRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) segChunks.push(e.data); };
+    segmentRecorder.onstop = () => {
+        if (segChunks.length === 0) return;
+        const blob = new Blob(segChunks, { type: segChunks[0].type || 'audio/webm' });
+        // 無音に近い極小Blobはスキップ（開始直後の即停止など）
+        if (blob.size < 2000) return;
+        segCount++;
+        enqueueSegment(blob, segCount);
+    };
+    segmentRecorder.start();
+}
+
+// 5分経過ごとにセグメントを確定して次を開始
+function rotateSegment() {
+    if (!recRunning || !segmentRecorder) return;
+    try { segmentRecorder.stop(); } catch (_) {}
+    startSegmentRecorder();
 }
 
 $('rec-start').addEventListener('click', async () => {
-    if (!recognition) recognition = setupRecognition();
-    if (!recognition) return;
-    recManuallyStopped = false;
-    recActive = true;
-    recRestartAttempts = 0;
-    if (recRestartTimer) { clearTimeout(recRestartTimer); recRestartTimer = null; }
-    try {
-        recognition.start();
-        recStartedAt = Date.now();
-        $('rec-status').classList.add('recording');
-        $('rec-status-text').textContent = '録音中…';
-        $('rec-start').disabled = true;
-        $('rec-stop').disabled = false;
-        recDurationTimer = setInterval(() => {
-            const sec = Math.floor((Date.now() - recStartedAt) / 1000);
-            const mm = String(Math.floor(sec / 60)).padStart(2, '0');
-            const ss = String(sec % 60).padStart(2, '0');
-            $('rec-duration').textContent = `${mm}:${ss}`;
-        }, 500);
-    } catch (e) {
-        alert('録音を開始できませんでした: ' + e.message);
+    if (!window.MediaRecorder || !navigator.mediaDevices?.getUserMedia) {
+        alert('お使いのブラウザは録音に未対応です（Chrome / Edge 推奨）');
+        return;
     }
+    const provider = settings.sttProvider || 'groq';
+    if (provider === 'groq' && !settings.groqKey) {
+        alert('設定 → APIキー で Groq APIキーを登録してください\nhttps://console.groq.com/keys で無料発行できます');
+        return;
+    }
+    if (provider === 'openai' && !settings.whisperKey) {
+        alert('設定 → APIキー で OpenAI APIキー（Whisper用）を登録してください');
+        return;
+    }
+    try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+        $('rec-status-text').textContent = '⚠ マイクの使用が許可されていません。ブラウザのアドレスバー左の鍵マークからマイクを「許可」にしてください。';
+        return;
+    }
+    // 状態リセット
+    backupChunks = [];
+    segCount = 0; segDone = 0; segFailed = 0;
+    sttQueue = Promise.resolve();
+    recRunning = true;
+
+    // バックアップ用（連続・1セッション）
+    backupRecorder = new MediaRecorder(mediaStream, recMimeType() ? { mimeType: recMimeType() } : undefined);
+    backupRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) backupChunks.push(e.data); };
+    backupRecorder.start(1000); // 1秒ごとにチャンク蓄積
+
+    // 文字起こし用（5分ごとに回転）
+    startSegmentRecorder();
+    segTimer = setInterval(rotateSegment, SEGMENT_MS);
+
+    recStartedAt = Date.now();
+    $('rec-status').classList.add('recording');
+    $('rec-status-text').textContent = '録音中…（5分ごとに自動文字起こし）';
+    $('rec-start').disabled = true;
+    $('rec-stop').disabled = false;
+    $('rec-save-audio').disabled = true;
+    recSetProgress('録音中… 最初の文字起こしは5分後（停止時にも実行されます）');
+    recDurationTimer = setInterval(() => {
+        const sec = Math.floor((Date.now() - recStartedAt) / 1000);
+        const mm = String(Math.floor(sec / 60)).padStart(2, '0');
+        const ss = String(sec % 60).padStart(2, '0');
+        $('rec-duration').textContent = `${mm}:${ss}`;
+    }, 500);
 });
 
 $('rec-stop').addEventListener('click', () => {
-    if (!recognition) return;
-    recActive = false;
-    recManuallyStopped = true;
-    if (recRestartTimer) { clearTimeout(recRestartTimer); recRestartTimer = null; }
-    try { recognition.stop(); } catch (_) {}
+    if (!recRunning) return;
+    recRunning = false;
+    if (segTimer) { clearInterval(segTimer); segTimer = null; }
+    if (recDurationTimer) { clearInterval(recDurationTimer); recDurationTimer = null; }
+    // 最終セグメントを確定（onstopでキューに入る）
+    try { if (segmentRecorder && segmentRecorder.state !== 'inactive') segmentRecorder.stop(); } catch (_) {}
+    try { if (backupRecorder && backupRecorder.state !== 'inactive') backupRecorder.stop(); } catch (_) {}
+    if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+    $('rec-status').classList.remove('recording');
+    $('rec-status-text').textContent = 'マイクは停止中です';
+    $('rec-start').disabled = false;
+    $('rec-stop').disabled = true;
+    // バックアップの確定は onstop 後に反映される（少し待って有効化）
+    setTimeout(() => { if (backupChunks.length > 0) $('rec-save-audio').disabled = false; }, 500);
+    recSetProgress('文字起こしの完了を待っています…');
+});
+
+$('rec-save-audio').addEventListener('click', () => {
+    if (backupChunks.length === 0) { alert('保存できる録音データがありません'); return; }
+    const blob = new Blob(backupChunks, { type: backupChunks[0].type || 'audio/webm' });
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const name = `録音_${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}.webm`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
 });
 
 $('rec-clear').addEventListener('click', () => {
-    if (confirm('録音テキストをクリアします。よろしいですか？')) {
+    if (recRunning) { alert('録音中はクリアできません。先に「■ 停止」を押してください。'); return; }
+    if (confirm('録音テキストと録音データをクリアします。よろしいですか？')) {
         $('transcript-record').value = '';
-        $('rec-interim').textContent = '（録音中の最新発言がここに表示されます）';
+        backupChunks = [];
+        segCount = 0; segDone = 0; segFailed = 0;
+        $('rec-save-audio').disabled = true;
+        recSetProgress('（録音を開始すると、5分ごとに自動で文字起こしされます）');
         $('rec-duration').textContent = '00:00';
     }
 });
@@ -1858,13 +2116,19 @@ function detectMistranscriptions(text, names) {
     return filtered;
 }
 
-function showMistransPanel(candidates) {
+function showMistransPanel(candidates, targetTextareaId = 'transcript-upload') {
     const panel = $('mistrans-panel');
     const list = $('mistrans-list');
     const title = $('mistrans-title');
     if (!candidates || candidates.length === 0) {
         panel.style.display = 'none';
         return;
+    }
+    // 適用先のtextareaを記録し、パネルをその直後へ移動（録音/アップロード両対応）
+    list.dataset.target = targetTextareaId;
+    const targetTa = $(targetTextareaId);
+    if (targetTa && targetTa.nextElementSibling !== panel) {
+        targetTa.insertAdjacentElement('afterend', panel);
     }
     title.textContent = `🔍 誤変換候補 ${candidates.length}件`;
     list.innerHTML = '';
@@ -1895,17 +2159,18 @@ $('btn-mistrans-apply').addEventListener('click', () => {
     const candidates = JSON.parse(list.dataset.candidates || '[]');
     const checkboxes = list.querySelectorAll('input[type="checkbox"]:checked');
     if (checkboxes.length === 0) { alert('置換する候補を選択してください'); return; }
-    let text = $('transcript-upload').value;
+    const targetId = list.dataset.target || 'transcript-upload';
+    let text = $(targetId).value;
     let total = 0;
     checkboxes.forEach(cb => {
         const c = candidates[parseInt(cb.dataset.idx)];
         if (!c) return;
-        const before = text;
+        // 実際の出現数を数えてから置換（表示件数を正確にする）
+        const occurrences = text.split(c.wrong).length - 1;
         text = text.split(c.wrong).join(c.correct);
-        const replaced = (before.length - text.length === 0) ? (before.match(new RegExp(c.wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'))||[]).length : Math.abs(before.length - text.length) / Math.abs(c.wrong.length - c.correct.length);
-        total += c.count;
+        total += occurrences;
     });
-    $('transcript-upload').value = text;
+    $(targetId).value = text;
     $('mistrans-panel').style.display = 'none';
     showStatus('success', `✅ ${checkboxes.length}種類の誤変換を置換しました（${total}箇所）`);
     setTimeout(hideStatus, 3000);
@@ -1943,7 +2208,7 @@ $('btn-transcribe').addEventListener('click', async () => {
         progEl.textContent = `✅ 完了（${sec}秒）`;
         // 誤変換候補を自動検出
         const candidates = detectMistranscriptions(text, settings.names);
-        showMistransPanel(candidates);
+        showMistransPanel(candidates, 'transcript-upload');
         if (candidates.length > 0) {
             showStatus('success', `✅ 文字起こし完了（${candidates.length}件の誤変換候補を検出）`);
         } else {
@@ -2047,7 +2312,7 @@ $('btn-generate').addEventListener('click', async () => {
     const anonTranscript = anonymize(transcript, mapping);
     const prompt = buildPrompt(tab, meta, anonTranscript);
 
-    showStatus('info', `${TEMPLATES[tab].title} の会議録を生成中…（プロバイダー: ${provider}）`, true);
+    showStatus('info', `${getTemplate(tab).title} の会議録を生成中…（プロバイダー: ${provider}）`, true);
     $('btn-generate').disabled = true;
     try {
         const llmOut = await callLLM(prompt, (attempt, max, waitSec) => {
@@ -2073,7 +2338,7 @@ $('btn-generate').addEventListener('click', async () => {
 });
 
 function buildHeader(tab, meta) {
-    const title = TEMPLATES[tab].title;
+    const title = getTemplate(tab).title;
     const dateStr = meta.date ? formatJpDate(meta.date) : '令和　年　月　日（　）';
     const timeStr = (meta.timeStart || meta.timeEnd) ? `${meta.timeStart || ''}〜${meta.timeEnd || ''}` : '';
     return `会議記録簿〈 ${title} 〉
@@ -2122,7 +2387,7 @@ $('btn-copy').addEventListener('click', async () => {
 
 function buildFilename(ext) {
     const tab = getCurrentTab();
-    const title = TEMPLATES[tab].title;
+    const title = getTemplate(tab).title;
     const meta = getMeta();
     const datePart = meta.date ? meta.date.replace(/-/g,'') : new Date().toISOString().slice(0,10).replace(/-/g,'');
     return `${datePart}_会議録_${title}.${ext}`;
@@ -2155,7 +2420,7 @@ $('btn-download-docx').addEventListener('click', async () => {
 async function generateDocx(text) {
     const D = window.docx;
     const tab = getCurrentTab();
-    const title = TEMPLATES[tab].title;
+    const title = getTemplate(tab).title;
     const meta = getMeta();
     const dateStr = meta.date ? formatJpDate(meta.date) : '';
     const timeStr = (meta.timeStart || meta.timeEnd) ? `${meta.timeStart || ''}〜${meta.timeEnd || ''}` : '';
@@ -2300,7 +2565,7 @@ function init() {
     // 期日にデフォルトで本日を入れる
     const t = new Date();
     $('meta-date').value = t.toISOString().slice(0,10);
-    setupRecognition();  // 利用可否チェック
+    renderTabs();  // カスタムテンプレ含むタブ描画
     updateModelInfo();
     // 音声前処理チェックボックスの状態を反映
     if ($('cfg-audio-preprocess')) {
