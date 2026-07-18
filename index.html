@@ -450,11 +450,12 @@
                 </div>
                 <label style="margin-top:10px;">モデル</label>
                 <select id="cfg-gemini-model">
-                    <option value="gemini-2.5-flash">gemini-2.5-flash（推奨・無料枠あり）</option>
-                    <option value="gemini-2.5-pro">gemini-2.5-pro（より高品質）</option>
-                    <option value="gemini-2.0-flash">gemini-2.0-flash</option>
-                    <option value="gemini-1.5-flash">gemini-1.5-flash</option>
-                    <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+                    <option value="gemini-flash-latest">gemini-flash-latest（常に最新のFlash・推奨）</option>
+                    <option value="gemini-3.5-flash">gemini-3.5-flash（最新・無料枠あり）</option>
+                    <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite（軽量・高速）</option>
+                    <option value="gemini-2.5-flash">gemini-2.5-flash（安定）</option>
+                    <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview（高品質・無料枠は少なめ）</option>
+                    <option value="gemini-2.5-pro">gemini-2.5-pro（高品質・安定）</option>
                 </select>
             </div>
 
@@ -817,7 +818,7 @@ const DEFAULT_NAMES = [
 const defaultSettings = () => ({
     provider: 'gemini',
     geminiKey: '',
-    geminiModel: 'gemini-2.5-flash',
+    geminiModel: 'gemini-flash-latest',
     claudeKey: '',
     claudeModel: 'claude-haiku-4-5-20251001',
     openaiKey: '',
