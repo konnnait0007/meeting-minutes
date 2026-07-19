@@ -330,6 +330,9 @@
             <div class="interim" id="rec-progress">（録音を開始すると、5分ごとに自動で文字起こしされます）</div>
             <label style="margin-top:14px;">文字起こし結果</label>
             <textarea id="transcript-record" rows="10" placeholder="録音を開始すると、5分ごとに文字起こし結果がここに追記されます"></textarea>
+            <div class="btn-row" style="margin-top:10px;">
+                <button class="btn btn-ghost" id="btn-register-word-record" style="font-size:0.85rem;">📖 選択した語を単語登録</button>
+            </div>
             <div class="help">
                 🎙 サウンドレコーダー方式: 録音はブラウザ内に確実に保存され、<strong>5分ごとに自動で文字起こし</strong>されます（沈黙で途切れる心配はありません）。<br>
                 文字起こしには「⚙ 設定 → APIキー」で <strong>Groq APIキー（無料）</strong>の登録が必要です。マイクの許可が必要です。<br>
@@ -379,6 +382,23 @@
                 <p style="font-size:0.82rem; color:#78350f; margin-bottom:10px;">登録名と類似する単語を検出しました。チェックを入れて「一括置換」を押してください。</p>
                 <div id="mistrans-list" style="max-height:240px; overflow-y:auto; background:#fffbeb; border-radius:6px; padding:8px;"></div>
             </div>
+            <div id="learn-panel" style="display:none; margin-top:12px; padding:14px; background:#eef2ff; border-left:4px solid #6366f1; border-radius:0 8px 8px 0;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <strong id="learn-title">📖 単語登録の候補</strong>
+                    <div>
+                        <button class="btn btn-secondary" id="btn-learn-save" style="font-size:0.82rem; padding:6px 12px;">✓ 選択を単語登録</button>
+                        <button class="btn btn-ghost" id="btn-learn-close" style="font-size:0.82rem; padding:6px 10px;">✕ 閉じる</button>
+                    </div>
+                </div>
+                <p style="font-size:0.82rem; color:#3730a3; margin-bottom:10px;">
+                    修正された箇所です。登録すると<strong>次回からの文字起こしで自動的に直ります</strong>。<br>
+                    ※ その場限りの言い回しの直しは登録しないでください（以後すべての文字起こしに適用されます）
+                </p>
+                <div id="learn-list" style="max-height:240px; overflow-y:auto; background:#f5f7ff; border-radius:6px; padding:8px;"></div>
+            </div>
+            <div class="btn-row" style="margin-top:10px;">
+                <button class="btn btn-ghost" id="btn-register-word-upload" style="font-size:0.85rem;">📖 選択した語を単語登録</button>
+            </div>
         </div>
     </section>
 
@@ -408,6 +428,7 @@
             <button class="btn btn-secondary" id="btn-download-md">📄 Markdown で保存</button>
             <button class="btn btn-secondary" id="btn-download-txt">📄 テキストで保存</button>
             <button class="btn btn-ghost" id="btn-copy">📋 コピー</button>
+            <button class="btn btn-ghost" id="btn-register-word-output">📖 選択した語を単語登録</button>
         </div>
     </section>
 
@@ -423,6 +444,7 @@
         <div class="settings-tabs">
             <button class="settings-tab active" data-stab="api">APIキー</button>
             <button class="settings-tab" data-stab="anon">匿名化リスト</button>
+            <button class="settings-tab" data-stab="dict">単語辞書</button>
             <button class="settings-tab" data-stab="prompt">プロンプト調整</button>
         </div>
 
@@ -543,6 +565,35 @@
                         </tr>
                     </thead>
                     <tbody id="name-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 単語辞書 -->
+        <div class="settings-panel" data-spanel="dict">
+            <p class="small" style="margin-bottom:12px;">
+                ここに登録した語は <strong>文字起こしの直後に自動で置換</strong> され、さらに <strong>要約AIへの表記ルール</strong> としても渡されます。<br>
+                文字起こし結果や出力結果を編集すると、変更箇所が「単語登録の候補」として提案されます。
+            </p>
+            <p class="small" style="margin-bottom:12px; color:#b45309;">
+                ⚠ ここの内容は <strong>今後すべての文字起こしに適用されます</strong>。その場限りの言い回しの直しを登録すると、かえって誤りが増えます。
+                おかしくなったら「有効」のチェックを外すか、✕ で削除してください。
+            </p>
+            <div class="btn-row" style="margin-bottom:10px;">
+                <button class="btn btn-secondary" id="btn-add-dict">＋ 単語を追加</button>
+                <button class="btn btn-danger" id="btn-clear-dict">全削除</button>
+            </div>
+            <div style="overflow-x:auto;">
+                <table class="name-table" id="dict-table">
+                    <thead>
+                        <tr>
+                            <th style="width:40%;">誤変換（この語が）</th>
+                            <th style="width:40%;">正しい語（こう直る）</th>
+                            <th>有効</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="dict-tbody"></tbody>
                 </table>
             </div>
         </div>
@@ -675,6 +726,32 @@
     <div class="dialog-footer">
         <button class="btn btn-secondary" data-close="template-dialog">キャンセル</button>
         <button class="btn btn-primary" id="tpl-save">保存</button>
+    </div>
+</dialog>
+
+<dialog id="word-dialog" style="max-width:560px; width:92vw;">
+    <div class="dialog-header">
+        <h2>📖 単語登録</h2>
+        <button class="close-btn" data-close="word-dialog">✕</button>
+    </div>
+    <div class="dialog-body">
+        <p class="small" style="margin-bottom:12px;">
+            文字起こしで <strong>間違って出てくる語</strong> と、<strong>本来の正しい語</strong> を登録します。<br>
+            次回からの文字起こしで自動的に置換されます。
+        </p>
+        <div class="field">
+            <label>誤変換（この語が出てきたら）</label>
+            <input type="text" id="word-wrong" placeholder="例: 岡部縁長">
+        </div>
+        <div class="field">
+            <label>正しい語（こう直す）</label>
+            <input type="text" id="word-correct" placeholder="例: 岡部園長">
+        </div>
+        <div class="help" id="word-hint"></div>
+    </div>
+    <div class="dialog-footer">
+        <button class="btn btn-secondary" data-close="word-dialog">キャンセル</button>
+        <button class="btn btn-primary" id="word-save">登録</button>
     </div>
 </dialog>
 
@@ -831,6 +908,9 @@ const defaultSettings = () => ({
     glossary: '',
     audioPreprocess: true, // 音声前処理を自動で行うか
     customTemplates: [],   // {id, title, sections, guidance} ユーザー作成テンプレ
+    // 単語辞書（学習）: {wrong, correct, enabled, createdAt}
+    // ※ names とは別キーにすること。names は dataVersion 更新時にリセットされるため
+    userDict: [],
     names: [],  // {type, name, note}
     dataVersion: ''
 });
@@ -899,6 +979,167 @@ function deanonymize(text, mapping) {
     let out = text;
     for (const m of mapping) {
         out = out.split(m.code).join(m.original);
+    }
+    return out;
+}
+
+//==============================================================
+// 2-b. 単語辞書（学習）
+//==============================================================
+// ユーザーが直した誤変換を記憶し、次回以降の文字起こしに自動適用する。
+
+// 有効なエントリを長い語から順に返す（buildAnonymizer と同じ方針。
+// 短い語が先に当たって長い語を壊すのを防ぐ）
+function activeDict() {
+    return (settings.userDict || [])
+        .filter(d => d && d.wrong && d.correct && d.enabled !== false)
+        .sort((a, b) => b.wrong.length - a.wrong.length);
+}
+
+// 辞書を適用して { text, replaced } を返す
+function applyUserDict(text) {
+    if (!text) return { text: text, replaced: 0 };
+    let out = text;
+    let replaced = 0;
+    for (const d of activeDict()) {
+        const n = out.split(d.wrong).length - 1;
+        if (n > 0) {
+            out = out.split(d.wrong).join(d.correct);
+            replaced += n;
+        }
+    }
+    return { text: out, replaced };
+}
+
+// 辞書に追加（wrong をキーに重複排除）。新規追加できた件数を返す
+function addToUserDict(pairs) {
+    if (!settings.userDict) settings.userDict = [];
+    let added = 0;
+    for (const p of pairs) {
+        const wrong = (p.wrong || '').trim();
+        const correct = (p.correct || '').trim();
+        if (!wrong || !correct || wrong === correct) continue;
+        const existing = settings.userDict.find(d => d.wrong === wrong);
+        if (existing) {
+            existing.correct = correct;
+            existing.enabled = true;
+            continue;
+        }
+        settings.userDict.push({ wrong, correct, enabled: true, createdAt: new Date().toISOString() });
+        added++;
+    }
+    saveSettings();
+    return added;
+}
+
+//--------------------------------------------------------------
+// 編集差分から {wrong, correct} を抽出する
+//--------------------------------------------------------------
+// 語の区切りとみなす文字（ひらがな・空白・記号）
+const DELIM_RE = /[ぁ-ゖ\s、。，．・…「」『』（）()【】〔〕\-—〜~!?！？:：;；"'`]/;
+// 「中身が無い」= ひらがな・記号だけ
+const NO_CONTENT_RE = /^[ぁ-ゖー\s、。，．・…「」『』（）()【】〔〕\-—〜~!?！？:：;；"'`]*$/;
+
+function isWordChar(ch) {
+    return !!ch && !DELIM_RE.test(ch);
+}
+
+// 学習候補として妥当か判定する。
+// ここが緩いと助詞・語尾の直しまで辞書に入り、以降すべての文字起こしが壊れるので厳しめにする。
+// core は「語の境界まで広げる前」の最小の変更部分。判定はこちらで行う。
+function isLearnablePair(wrong, correct, coreWrong, coreCorrect) {
+    if (!wrong || !correct || wrong === correct) return false;
+    if (wrong.indexOf('\n') >= 0 || correct.indexOf('\n') >= 0) return false;
+    // 登録される語（広げた後）の長さ
+    if (wrong.length < 2 || wrong.length > 12) return false;
+    if (correct.length < 2 || correct.length > 12) return false;
+    // 変更の中心がひらがな・記号だけ（助詞「が→は」・語尾「ました→ています」・句読点）なら覚えない
+    if (NO_CONTENT_RE.test((coreWrong || '') + (coreCorrect || ''))) return false;
+    // 語そのものがひらがな・記号だけの場合も覚えない
+    if (NO_CONTENT_RE.test(wrong) || NO_CONTENT_RE.test(correct)) return false;
+    return true;
+}
+
+// 共通の先頭・末尾を削って変更部分を取り出し、さらに語の境界まで広げる。
+// 「縁→園」のような1文字の差を、そのまま辞書に入れると全文を壊すため、
+// 前後の漢字・カタカナを取り込んで「岡部縁長→岡部園長」という安全な単位にする。
+function isolateChange(before, after) {
+    let s = 0;
+    const maxS = Math.min(before.length, after.length);
+    while (s < maxS && before[s] === after[s]) s++;
+    let e = 0;
+    const maxE = Math.min(before.length - s, after.length - s);
+    while (e < maxE && before[before.length - 1 - e] === after[after.length - 1 - e]) e++;
+
+    // 最小の変更部分（学習可否の判定に使う）
+    const coreWrong = before.slice(s, before.length - e);
+    const coreCorrect = after.slice(s, after.length - e);
+
+    // 語の境界（ひらがな・記号）まで前後に広げる
+    let s2 = s, e2 = e;
+    while (s2 > 0 && isWordChar(before[s2 - 1])) s2--;
+    while (e2 > 0
+        && before.length - e2 > s2
+        && after.length - e2 > s2
+        && isWordChar(before[before.length - e2])) e2--;
+
+    return {
+        wrong: before.slice(s2, before.length - e2),
+        correct: after.slice(s2, after.length - e2),
+        coreWrong,
+        coreCorrect
+    };
+}
+
+// 行単位のLCSで対応づけ、置き換わった行のペアを返す
+function diffLinePairs(beforeLines, afterLines) {
+    const n = beforeLines.length, m = afterLines.length;
+    if (n * m > 400000) return [];   // 長すぎる場合は諦める（O(n*m)のため）
+    const dp = [];
+    for (let i = 0; i <= n; i++) dp.push(new Uint32Array(m + 1));
+    for (let i = n - 1; i >= 0; i--) {
+        for (let j = m - 1; j >= 0; j--) {
+            dp[i][j] = beforeLines[i] === afterLines[j]
+                ? dp[i + 1][j + 1] + 1
+                : Math.max(dp[i + 1][j], dp[i][j + 1]);
+        }
+    }
+    const pairs = [];
+    let i = 0, j = 0, delBuf = [], insBuf = [];
+    const flush = () => {
+        // 1対1で置き換わったブロックのみ学習対象にする
+        if (delBuf.length === insBuf.length) {
+            for (let k = 0; k < delBuf.length; k++) pairs.push([delBuf[k], insBuf[k]]);
+        }
+        delBuf = []; insBuf = [];
+    };
+    while (i < n && j < m) {
+        if (beforeLines[i] === afterLines[j]) { flush(); i++; j++; }
+        else if (dp[i + 1][j] >= dp[i][j + 1]) delBuf.push(beforeLines[i++]);
+        else insBuf.push(afterLines[j++]);
+    }
+    while (i < n) delBuf.push(beforeLines[i++]);
+    while (j < m) insBuf.push(afterLines[j++]);
+    flush();
+    return pairs;
+}
+
+// 編集前後のテキストから学習候補を抽出する
+function extractLearnCandidates(before, after) {
+    if (!before || !after || before === after) return [];
+    const linePairs = diffLinePairs(before.split(/\r?\n/), after.split(/\r?\n/));
+    const seen = {};
+    const out = [];
+    for (const pair of linePairs) {
+        const ch = isolateChange(pair[0], pair[1]);
+        if (!isLearnablePair(ch.wrong, ch.correct, ch.coreWrong, ch.coreCorrect)) continue;
+        // wrong / correct は改行を含まないことが保証済みなので改行を区切りに使える
+        const key = ch.wrong + '\n' + ch.correct;
+        if (seen[key]) continue;
+        // 既に辞書にある語は提案しない
+        if ((settings.userDict || []).some(d => d.wrong === ch.wrong)) continue;
+        seen[key] = true;
+        out.push({ wrong: ch.wrong, correct: ch.correct, count: before.split(ch.wrong).length - 1 });
     }
     return out;
 }
@@ -1050,6 +1291,11 @@ function buildPrompt(tab, meta, transcript) {
     const sections = tpl.sections.map(s => `  ${s}`).join('\n');
     const extra = settings.extraPrompt ? `\n\n■追加の指示\n${settings.extraPrompt}` : '';
     const glossary = settings.glossary ? `\n\n■組織固有の用語・定型文\n${settings.glossary}` : '';
+    // 単語辞書を表記ルールとして渡す（プロンプト肥大を避けるため上限40件）
+    const dictList = activeDict().slice(0, 40);
+    const dict = dictList.length
+        ? `\n\n■表記の統一（左の表記が出てきたら必ず右の表記にすること）\n${dictList.map(d => `- ${d.wrong} → ${d.correct}`).join('\n')}`
+        : '';
     const attendees = meta.attendees || '（記載なし）';
 
     return `あなたは日本の社会福祉法人の事務担当者です。職員会議の発言記録から、所定のテンプレートに沿って公式な「会議記録簿」を作成します。
@@ -1074,7 +1320,7 @@ ${tpl.guidance}
 - 利用者様の名前は「○○様」、職員の名前は「○○さん」または役職+苗字（例: 石井部長）で表記
 - 数字や日付は元発言の表記を尊重（例: 12/8、令和8年1月6日）
 - 該当する内容が会議で触れられていない項目は項目名のみ残し空欄にせず「特になし」または項目自体を省略
-- 推測で内容を加えない。記録にない情報は書かない${extra}${glossary}
+- 推測で内容を加えない。記録にない情報は書かない${extra}${glossary}${dict}
 
 ■会議の内容（文字起こし / メモ）
 ${transcript}
@@ -1427,7 +1673,13 @@ async function transcribeAudio(file, onProgress) {
         results.push(txt);
     }
     // 全チャンク結合後にもう一度クリーニング（境界をまたぐ重複に対応）
-    return cleanTranscript(results.join('\n'));
+    const cleaned = cleanTranscript(results.join('\n'));
+    // 登録済みの単語辞書を適用（貼り付け経路には適用しない）
+    const applied = applyUserDict(cleaned);
+    if (applied.replaced > 0) {
+        onProgress && onProgress(`単語辞書で ${applied.replaced}箇所 を自動修正しました`);
+    }
+    return applied.text;
 }
 
 //==============================================================
@@ -1700,6 +1952,7 @@ $('btn-settings').addEventListener('click', () => {
     updateProviderBlocks();
     updateSttBlocks();
     renderNameTable();
+    renderDictTable();
     $('settings-dialog').showModal();
 });
 
@@ -1742,6 +1995,7 @@ $('btn-save-settings').addEventListener('click', () => {
         settings.extraPrompt = $('cfg-extra-prompt').value;
         settings.glossary = $('cfg-glossary').value;
         settings.names = readNameTable();
+        settings.userDict = readDictTable();
         const ok = saveSettings();
         updateModelInfo();
         if (ok) {
@@ -1858,6 +2112,61 @@ $('btn-clear-prompt').addEventListener('click', () => {
     $('cfg-glossary').value = '';
 });
 
+//==============================================================
+// 9-b. 単語辞書テーブル（匿名化テーブルと同じ作り）
+//==============================================================
+function renderDictTable() {
+    const tb = $('dict-tbody');
+    tb.innerHTML = '';
+    const dict = settings.userDict || [];
+    if (dict.length === 0) {
+        addDictRow({ wrong: '', correct: '', enabled: true });
+    } else {
+        dict.forEach(d => addDictRow(d));
+    }
+}
+
+function addDictRow(data) {
+    const tb = $('dict-tbody');
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+        <td><input type="text" class="row-wrong" placeholder="例: 岡部縁長"></td>
+        <td><input type="text" class="row-correct" placeholder="例: 岡部園長"></td>
+        <td style="text-align:center;"><input type="checkbox" class="row-enabled"></td>
+        <td><button class="delete-row" title="削除">✕</button></td>
+    `;
+    tr.querySelector('.row-wrong').value = data.wrong || '';
+    tr.querySelector('.row-correct').value = data.correct || '';
+    tr.querySelector('.row-enabled').checked = data.enabled !== false;
+    tr.dataset.createdAt = data.createdAt || '';
+    tr.querySelector('.delete-row').addEventListener('click', () => tr.remove());
+    tb.appendChild(tr);
+}
+
+function readDictTable() {
+    const rows = $('dict-tbody').querySelectorAll('tr');
+    const out = [];
+    rows.forEach(r => {
+        const wrong = r.querySelector('.row-wrong').value.trim();
+        const correct = r.querySelector('.row-correct').value.trim();
+        if (!wrong || !correct) return;
+        out.push({
+            wrong,
+            correct,
+            enabled: r.querySelector('.row-enabled').checked,
+            createdAt: r.dataset.createdAt || new Date().toISOString()
+        });
+    });
+    return out;
+}
+
+$('btn-add-dict').addEventListener('click', () => addDictRow({ wrong: '', correct: '', enabled: true }));
+$('btn-clear-dict').addEventListener('click', () => {
+    if (confirm('登録した単語をすべて削除しますか？（保存ボタンを押すまで確定されません）')) {
+        $('dict-tbody').innerHTML = '';
+    }
+});
+
 $('btn-add-name').addEventListener('click', () => addNameRow({ type: 'user', name: '', note: '' }));
 $('btn-clear-names').addEventListener('click', () => {
     if (confirm('全ての名前を削除しますか？（保存ボタンを押すまで確定されません）')) {
@@ -1907,7 +2216,8 @@ function enqueueSegment(blob, segNo) {
             });
             if (text && text.trim()) {
                 const ta = $('transcript-record');
-                ta.value += (ta.value && !ta.value.endsWith('\n') ? '\n' : '') + text.trim() + '\n';
+                const merged = ta.value + (ta.value && !ta.value.endsWith('\n') ? '\n' : '') + text.trim() + '\n';
+                setTextWithSnapshot('transcript-record', merged);
                 ta.scrollTop = ta.scrollHeight;
             }
             segDone++;
@@ -2172,9 +2482,129 @@ $('btn-mistrans-apply').addEventListener('click', () => {
         total += occurrences;
     });
     $(targetId).value = text;
+    // 置換後の状態を基準にする（この置換自体が学習候補として再提案されないように）
+    textSnapshots[targetId] = text;
+    // 確定した置換は単語辞書にも覚えさせる
+    const learned = addToUserDict(Array.from(checkboxes).map(cb => candidates[parseInt(cb.dataset.idx)]).filter(Boolean));
     $('mistrans-panel').style.display = 'none';
-    showStatus('success', `✅ ${checkboxes.length}種類の誤変換を置換しました（${total}箇所）`);
-    setTimeout(hideStatus, 3000);
+    const suffix = learned > 0 ? `／${learned}件を単語辞書に登録しました` : '';
+    showStatus('success', `✅ ${checkboxes.length}種類の誤変換を置換しました（${total}箇所）${suffix}`);
+    setTimeout(hideStatus, 4000);
+});
+
+//==============================================================
+// 11-c. 単語登録（学習）
+//==============================================================
+// プログラムから書き込んだ時点のテキストを保持し、ユーザーの編集との差分を取る
+const textSnapshots = {};
+const LEARN_TARGETS = ['transcript-upload', 'transcript-record', 'output'];
+
+function setTextWithSnapshot(id, value) {
+    $(id).value = value;
+    textSnapshots[id] = value;
+}
+
+function showLearnPanel(candidates, targetId) {
+    const panel = $('learn-panel');
+    const list = $('learn-list');
+    if (!candidates || candidates.length === 0) {
+        panel.style.display = 'none';
+        return;
+    }
+    // 対象欄の直下へ移動（誤変換パネルと同じ方式）
+    list.dataset.target = targetId;
+    const targetTa = $(targetId);
+    if (targetTa) targetTa.insertAdjacentElement('afterend', panel);
+    $('learn-title').textContent = `📖 単語登録の候補 ${candidates.length}件`;
+    list.innerHTML = '';
+    candidates.forEach((c, i) => {
+        const row = document.createElement('label');
+        row.style.cssText = 'display:flex; align-items:center; gap:10px; padding:6px 8px; border-bottom:1px solid #c7d2fe; font-size:0.9rem; cursor:pointer;';
+        row.innerHTML = `
+            <input type="checkbox" data-idx="${i}">
+            <span style="color:#dc2626; font-family:monospace;">${escapeHtml(c.wrong)}</span>
+            <span style="color:#6b7280;">→</span>
+            <strong style="color:#059669; font-family:monospace;">${escapeHtml(c.correct)}</strong>
+            <span style="color:#9ca3af; font-size:0.78rem; margin-left:auto;">元の文に${c.count}箇所</span>
+        `;
+        list.appendChild(row);
+    });
+    list.dataset.candidates = JSON.stringify(candidates);
+    panel.style.display = 'block';
+}
+
+function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, ch => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
+    ));
+}
+
+$('btn-learn-close').addEventListener('click', () => {
+    // 閉じたら現在値を基準に更新（同じ候補を何度も出さない）
+    const id = $('learn-list').dataset.target;
+    if (id && $(id)) textSnapshots[id] = $(id).value;
+    $('learn-panel').style.display = 'none';
+});
+
+$('btn-learn-save').addEventListener('click', () => {
+    const list = $('learn-list');
+    const candidates = JSON.parse(list.dataset.candidates || '[]');
+    const checked = list.querySelectorAll('input[type="checkbox"]:checked');
+    if (checked.length === 0) { alert('登録する単語を選択してください'); return; }
+    const added = addToUserDict(Array.from(checked).map(cb => candidates[parseInt(cb.dataset.idx)]).filter(Boolean));
+    const id = list.dataset.target;
+    if (id && $(id)) textSnapshots[id] = $(id).value;
+    $('learn-panel').style.display = 'none';
+    showStatus('success', `✅ ${added}件を単語辞書に登録しました（次回の文字起こしから自動で適用されます）`);
+    setTimeout(hideStatus, 4000);
+});
+
+// 編集を検知して学習候補を提案する
+LEARN_TARGETS.forEach(id => {
+    const el = $(id);
+    if (!el) return;
+    el.addEventListener('blur', () => {
+        const before = textSnapshots[id];
+        const after = el.value;
+        if (before === undefined || before === after) return;
+        const candidates = extractLearnCandidates(before, after);
+        // 候補が出なくても基準は進めておく（同じ差分を何度も評価しない）
+        textSnapshots[id] = after;
+        if (candidates.length > 0) showLearnPanel(candidates, id);
+    });
+});
+
+//--------------------------------------------------------------
+// 選択した語から単語登録
+//--------------------------------------------------------------
+function openWordDialog(sourceId) {
+    const ta = $(sourceId);
+    const sel = ta ? ta.value.slice(ta.selectionStart, ta.selectionEnd).trim() : '';
+    $('word-wrong').value = '';
+    $('word-correct').value = sel;
+    $('word-hint').textContent = sel
+        ? '選択した語を「正しい語」に入れました。文字起こしで間違って出てくる語を上に入力してください。'
+        : '文字を選択してからこのボタンを押すと、その語が自動で入ります。';
+    $('word-dialog').showModal();
+    $('word-wrong').focus();
+}
+
+['upload', 'record', 'output'].forEach(kind => {
+    const btn = $(`btn-register-word-${kind}`);
+    if (!btn) return;
+    const sourceId = kind === 'output' ? 'output' : `transcript-${kind}`;
+    btn.addEventListener('click', () => openWordDialog(sourceId));
+});
+
+$('word-save').addEventListener('click', () => {
+    const wrong = $('word-wrong').value.trim();
+    const correct = $('word-correct').value.trim();
+    if (!wrong || !correct) { alert('「誤変換」と「正しい語」の両方を入力してください'); return; }
+    if (wrong === correct) { alert('同じ語が入力されています'); return; }
+    addToUserDict([{ wrong, correct }]);
+    $('word-dialog').close();
+    showStatus('success', `✅ 「${wrong} → ${correct}」を単語辞書に登録しました`);
+    setTimeout(hideStatus, 4000);
 });
 
 $('btn-transcribe').addEventListener('click', async () => {
@@ -2203,7 +2633,7 @@ $('btn-transcribe').addEventListener('click', async () => {
         const text = await transcribeAudio(f, (msg) => {
             progEl.innerHTML = `<span class="spinner"></span> ${msg}`;
         });
-        $('transcript-upload').value = text;
+        setTextWithSnapshot('transcript-upload', text);
         const sec = ((Date.now() - startedAt) / 1000).toFixed(0);
         progEl.className = 'status-banner show success';
         progEl.textContent = `✅ 完了（${sec}秒）`;
@@ -2322,7 +2752,7 @@ $('btn-generate').addEventListener('click', async () => {
         const restored = deanonymize(llmOut, mapping);
         // ヘッダーを付加
         const header = buildHeader(tab, meta);
-        $('output').value = header + '\n\n' + restored;
+        setTextWithSnapshot('output', header + '\n\n' + restored);
         showStatus('success', '✅ 生成しました。STEP4で内容を確認・編集できます。');
         setTimeout(hideStatus, 4000);
     } catch (e) {
