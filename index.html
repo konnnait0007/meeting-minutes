@@ -996,6 +996,9 @@ function activeDict() {
         .sort((a, b) => b.wrong.length - a.wrong.length);
 }
 
+// 直近の文字起こしで辞書が置換した件数（完了メッセージ用）
+let lastDictReplaced = 0;
+
 // 辞書を適用して { text, replaced } を返す
 function applyUserDict(text) {
     if (!text) return { text: text, replaced: 0 };
@@ -1091,8 +1094,9 @@ function isolateChange(before, after) {
     };
 }
 
-// 行単位のLCSで対応づけ、置き換わった行のペアを返す
-function diffLinePairs(beforeLines, afterLines) {
+// 文字列配列同士をLCSで対応づけ、1対1で置き換わった要素のペアを返す
+// （行同士にも、行内の単語トークン同士にも使う）
+function lcsSubstitutedPairs(beforeLines, afterLines) {
     const n = beforeLines.length, m = afterLines.length;
     if (n * m > 400000) return [];   // 長すぎる場合は諦める（O(n*m)のため）
     const dp = [];
@@ -1124,22 +1128,54 @@ function diffLinePairs(beforeLines, afterLines) {
     return pairs;
 }
 
+// 行を単語トークン（漢字・カタカナ・英数字の連続）に分割する
+const DELIM_SPLIT_RE = /[ぁ-ゖ\s、。，．・…「」『』（）()【】〔〕\-—〜~!?！？:：;；"'`]+/;
+function wordTokens(line) {
+    return line.split(DELIM_SPLIT_RE).filter(t => t.length > 0);
+}
+
+// トークン置換ペアの妥当性: 文字の共有率が低い組（前回→本日 等、
+// 行の全面書き換えで偶然対応しただけの無関係な語）を弾く
+function tokensSimilar(a, b) {
+    const setA = new Set(a);
+    let shared = 0;
+    for (const ch of new Set(b)) if (setA.has(ch)) shared++;
+    return shared / Math.min(a.length, b.length) >= 0.5;
+}
+
 // 編集前後のテキストから学習候補を抽出する
 function extractLearnCandidates(before, after) {
     if (!before || !after || before === after) return [];
-    const linePairs = diffLinePairs(before.split(/\r?\n/), after.split(/\r?\n/));
+    const linePairs = lcsSubstitutedPairs(before.split(/\r?\n/), after.split(/\r?\n/));
     const seen = {};
     const out = [];
+    const push = (wrong, correct) => {
+        // wrong / correct は改行を含まないことが保証済みなので改行を区切りに使える
+        const key = wrong + '\n' + correct;
+        if (seen[key]) return;
+        // 既に辞書にある語は提案しない
+        if ((settings.userDict || []).some(d => d.wrong === wrong)) return;
+        seen[key] = true;
+        out.push({ wrong, correct, count: before.split(wrong).length - 1 });
+    };
     for (const pair of linePairs) {
         const ch = isolateChange(pair[0], pair[1]);
-        if (!isLearnablePair(ch.wrong, ch.correct, ch.coreWrong, ch.coreCorrect)) continue;
-        // wrong / correct は改行を含まないことが保証済みなので改行を区切りに使える
-        const key = ch.wrong + '\n' + ch.correct;
-        if (seen[key]) continue;
-        // 既に辞書にある語は提案しない
-        if ((settings.userDict || []).some(d => d.wrong === ch.wrong)) continue;
-        seen[key] = true;
-        out.push({ wrong: ch.wrong, correct: ch.correct, count: before.split(ch.wrong).length - 1 });
+        // 変更の中心に区切り文字（ひらがな等）が入っている場合は、複数の語に
+        // またがる編集（複数修正・助詞込み・全面書き換え）なので文字単位では扱わない
+        const multiWord = DELIM_RE.test(ch.coreWrong) || DELIM_RE.test(ch.coreCorrect);
+        if (!multiWord && isLearnablePair(ch.wrong, ch.correct, ch.coreWrong, ch.coreCorrect)) {
+            push(ch.wrong, ch.correct);
+            continue;
+        }
+        // 単語トークン単位で照合し直し、置き換わった語だけを拾う
+        for (const tp of lcsSubstitutedPairs(wordTokens(pair[0]), wordTokens(pair[1]))) {
+            if (!isLearnablePair(tp[0], tp[1], tp[0], tp[1])) continue;
+            if (!tokensSimilar(tp[0], tp[1])) continue;
+            // 片方がもう片方を含む（報告→報告済 等）のは言い回しの変更であって
+            // 誤変換ではないので覚えない
+            if (tp[0].includes(tp[1]) || tp[1].includes(tp[0])) continue;
+            push(tp[0], tp[1]);
+        }
     }
     return out;
 }
@@ -1676,6 +1712,7 @@ async function transcribeAudio(file, onProgress) {
     const cleaned = cleanTranscript(results.join('\n'));
     // 登録済みの単語辞書を適用（貼り付け経路には適用しない）
     const applied = applyUserDict(cleaned);
+    lastDictReplaced = applied.replaced;
     if (applied.replaced > 0) {
         onProgress && onProgress(`単語辞書で ${applied.replaced}箇所 を自動修正しました`);
     }
@@ -2521,7 +2558,7 @@ function showLearnPanel(candidates, targetId) {
         const row = document.createElement('label');
         row.style.cssText = 'display:flex; align-items:center; gap:10px; padding:6px 8px; border-bottom:1px solid #c7d2fe; font-size:0.9rem; cursor:pointer;';
         row.innerHTML = `
-            <input type="checkbox" data-idx="${i}">
+            <input type="checkbox" data-idx="${i}" checked>
             <span style="color:#dc2626; font-family:monospace;">${escapeHtml(c.wrong)}</span>
             <span style="color:#6b7280;">→</span>
             <strong style="color:#059669; font-family:monospace;">${escapeHtml(c.correct)}</strong>
@@ -2551,11 +2588,23 @@ $('btn-learn-save').addEventListener('click', () => {
     const candidates = JSON.parse(list.dataset.candidates || '[]');
     const checked = list.querySelectorAll('input[type="checkbox"]:checked');
     if (checked.length === 0) { alert('登録する単語を選択してください'); return; }
-    const added = addToUserDict(Array.from(checked).map(cb => candidates[parseInt(cb.dataset.idx)]).filter(Boolean));
+    const pairs = Array.from(checked).map(cb => candidates[parseInt(cb.dataset.idx)]).filter(Boolean);
+    addToUserDict(pairs);
     const id = list.dataset.target;
-    if (id && $(id)) textSnapshots[id] = $(id).value;
+    let fixedNow = 0;
+    if (id && $(id)) {
+        // 直し漏れ（同じ誤変換が文中に残っている箇所）もこの場で置換する
+        let v = $(id).value;
+        for (const p of pairs) {
+            const n = v.split(p.wrong).length - 1;
+            if (n > 0) { v = v.split(p.wrong).join(p.correct); fixedNow += n; }
+        }
+        $(id).value = v;
+        textSnapshots[id] = v;
+    }
     $('learn-panel').style.display = 'none';
-    showStatus('success', `✅ ${added}件を単語辞書に登録しました（次回の文字起こしから自動で適用されます）`);
+    const extraMsg = fixedNow > 0 ? `／文中に残っていた${fixedNow}箇所も置換しました` : '';
+    showStatus('success', `✅ ${pairs.length}件を単語辞書に登録しました（次回の文字起こしから自動適用）${extraMsg}`);
     setTimeout(hideStatus, 4000);
 });
 
@@ -2564,13 +2613,17 @@ LEARN_TARGETS.forEach(id => {
     const el = $(id);
     if (!el) return;
     el.addEventListener('blur', () => {
-        const before = textSnapshots[id];
-        const after = el.value;
-        if (before === undefined || before === after) return;
-        const candidates = extractLearnCandidates(before, after);
-        // 候補が出なくても基準は進めておく（同じ差分を何度も評価しない）
-        textSnapshots[id] = after;
-        if (candidates.length > 0) showLearnPanel(candidates, id);
+        // すぐにパネルを出すと、blur の原因になったボタンが押し下げ中にレイアウトごと
+        // 下へずれてクリックが外れる。少し待ってから出す
+        setTimeout(() => {
+            const before = textSnapshots[id];
+            const after = el.value;
+            if (before === undefined || before === after) return;
+            const candidates = extractLearnCandidates(before, after);
+            // 候補が出なくても基準は進めておく（同じ差分を何度も評価しない）
+            textSnapshots[id] = after;
+            if (candidates.length > 0) showLearnPanel(candidates, id);
+        }, 250);
     });
 });
 
@@ -2580,6 +2633,7 @@ LEARN_TARGETS.forEach(id => {
 function openWordDialog(sourceId) {
     const ta = $(sourceId);
     const sel = ta ? ta.value.slice(ta.selectionStart, ta.selectionEnd).trim() : '';
+    $('word-dialog').dataset.source = sourceId;
     $('word-wrong').value = '';
     $('word-correct').value = sel;
     $('word-hint').textContent = sel
@@ -2602,8 +2656,21 @@ $('word-save').addEventListener('click', () => {
     if (!wrong || !correct) { alert('「誤変換」と「正しい語」の両方を入力してください'); return; }
     if (wrong === correct) { alert('同じ語が入力されています'); return; }
     addToUserDict([{ wrong, correct }]);
+    // 開いていた欄に同じ誤変換が残っていれば、この場で置換する
+    const srcId = $('word-dialog').dataset.source;
+    const src = srcId ? $(srcId) : null;
+    let fixedNow = 0;
+    if (src) {
+        const n = src.value.split(wrong).length - 1;
+        if (n > 0) {
+            src.value = src.value.split(wrong).join(correct);
+            textSnapshots[srcId] = src.value;
+            fixedNow = n;
+        }
+    }
     $('word-dialog').close();
-    showStatus('success', `✅ 「${wrong} → ${correct}」を単語辞書に登録しました`);
+    const extraMsg = fixedNow > 0 ? `（この文中の${fixedNow}箇所を置換しました）` : '（次回の文字起こしから自動適用）';
+    showStatus('success', `✅ 「${wrong} → ${correct}」を単語辞書に登録しました${extraMsg}`);
     setTimeout(hideStatus, 4000);
 });
 
@@ -2636,7 +2703,7 @@ $('btn-transcribe').addEventListener('click', async () => {
         setTextWithSnapshot('transcript-upload', text);
         const sec = ((Date.now() - startedAt) / 1000).toFixed(0);
         progEl.className = 'status-banner show success';
-        progEl.textContent = `✅ 完了（${sec}秒）`;
+        progEl.textContent = `✅ 完了（${sec}秒）` + (lastDictReplaced > 0 ? `・単語辞書で${lastDictReplaced}箇所を自動修正` : '');
         // 誤変換候補を自動検出
         const candidates = detectMistranscriptions(text, settings.names);
         showMistransPanel(candidates, 'transcript-upload');
